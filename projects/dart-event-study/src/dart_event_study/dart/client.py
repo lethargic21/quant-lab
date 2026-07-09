@@ -97,6 +97,60 @@ class DartClient:
 
         return self._cached_json("corp_codes", fetch)
 
+    def structured(self, endpoint: str, corp_code: str, bgn_de: str, end_de: str) -> list[dict]:
+        """주요사항보고서 구조화 API (tsstkAqDecsn.json, piicDecsn.json 등).
+
+        페이지네이션 없음 — list 필드 그대로 반환. status 013(없음)이면 [].
+        """
+
+        def fetch() -> list[dict]:
+            data = self._get(endpoint, corp_code=corp_code, bgn_de=bgn_de, end_de=end_de)
+            return data.get("list", [])
+
+        name = f"{endpoint.split('.')[0]}_{corp_code}_{bgn_de}_{end_de}"
+        return self._cached_json(name, fetch)
+
+    def stock_totals(self, corp_code: str, bsns_year: str, reprt_code: str) -> list[dict]:
+        """주식총수현황 (stockTotqySttus.json) — 발행주식총수(istc_totqy) 조회용.
+
+        reprt_code: 11013=1분기 11012=반기 11014=3분기 11011=사업보고서
+        """
+
+        def fetch() -> list[dict]:
+            data = self._get(
+                "stockTotqySttus.json",
+                corp_code=corp_code,
+                bsns_year=bsns_year,
+                reprt_code=reprt_code,
+            )
+            return data.get("list", [])
+
+        return self._cached_json(f"stocktot_{corp_code}_{bsns_year}_{reprt_code}", fetch)
+
+    def document_html(self, rcept_no: str) -> str:
+        """공시 원본 문서 (document.xml, zip 안의 xml/html 텍스트). 파일 캐시."""
+        docs_dir = self.cache_dir / "docs"
+        docs_dir.mkdir(exist_ok=True)
+        path = docs_dir / f"{rcept_no}.xml"
+        if path.exists():
+            return path.read_text(encoding="utf-8")
+
+        raw = self._get_bytes("document.xml", rcept_no=rcept_no)
+        if raw[:2] != b"PK":
+            # zip이 아니면 <result><status>..</status><message>..</message> 형태의 에러 XML
+            raise DartError(f"document.xml {rcept_no}: {raw[:200].decode('utf-8', errors='replace')}")
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            content = zf.read(zf.namelist()[0])
+        # 문서 인코딩이 섞여 있고 meta 선언이 실제와 다른 경우가 있음
+        # (2022+ 문서가 euc-kr 선언 + utf-8 본문 — 실측). utf-8 strict를 먼저 시도:
+        # euc-kr 한글 바이트는 utf-8 디코딩이 거의 항상 실패하므로 오검출 없음.
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            text = content.decode("cp949", errors="replace")
+        path.write_text(text, encoding="utf-8")
+        return text
+
     def list_disclosures(self, corp_code: str, bgn_de: str, end_de: str) -> list[dict]:
         """기간 내 공시 목록 전체 (list.json, 페이지네이션 처리).
 
