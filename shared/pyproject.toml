@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.0",
     "numpy>=1.26",
-    "pykrx>=1.0.45",
+    # 가격 소스는 FDR(네이버). pykrx는 KRX 정보데이터시스템 봇 차단으로 사용 불가 (2026-07 실측)
     "finance-datareader>=0.9.50",
     "pyarrow>=15.0",
 ]
