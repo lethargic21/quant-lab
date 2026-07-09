@@ -1,0 +1,34 @@
+[project]
+name = "dart-event-study"
+version = "0.1.0"
+description = "DART 공시 이벤트(자사주매입·유상증자·실적) 정보추출 → 이벤트 스터디 + 백테스트 (KOSPI200)"
+requires-python = ">=3.11"
+dependencies = [
+    "quantlab-shared",
+    "requests>=2.31",
+    "pandas>=2.0",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "jupyter>=1.0",
+]
+
+[tool.uv.sources]
+quantlab-shared = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dart_event_study"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

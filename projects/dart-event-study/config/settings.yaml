@@ -1,0 +1,53 @@
+# 파이프라인 전역 설정
+
+period:
+  start: "2019-01-01"
+  end: "2024-12-31"
+
+random_seed: 42
+
+# 타이밍 (절대 원칙 1 — look-ahead 방지)
+timing:
+  market_close: "15:30"       # 이 시각 이전 접수 공시 → 당일 종가 체결 가능
+                              # 이후 접수 → 익영업일 체결 가능 (보수적 가정)
+
+# 거래비용 (절대 원칙 4)
+costs:
+  transaction_tax: 0.0020     # 증권거래세, 매도 시 (0.18~0.23% 범위, 기본 0.20%)
+  slippage: 0.0010            # 편도 슬리피지 가정 (파라미터)
+
+# 이벤트별 방향 룰 (초안 — 조정 가능, 조정 시 이력 기록)
+direction_rules:
+  buyback:
+    direction: 1              # 호재 고정
+    # strength = 취득예정금액 / 공시 전일 시가총액
+
+  rights_offering:
+    # 배정방식별 기본 방향
+    by_allocation:
+      주주배정: -1
+      주주배정후실권주일반공모: -1
+      일반공모: -1
+      제3자배정: 0             # 중립~호재 (전략적 투자자 여부는 Phase 2에서 판별 시도)
+    # 자금 목적 보정 (기본 방향에 가산)
+    purpose_adjustment:
+      채무상환: -0.5
+      시설자금: +0.5
+      타법인증권취득: +0.5
+      운영자금: 0
+    # strength = 시총 대비 희석률 기반
+
+  earnings:
+    # 서프라이즈 = YoY 기준 (QoQ는 병행 계산·리포트만)
+    # direction = sign(YoY 서프라이즈), strength = 크기
+    surprise_metric: yoy
+    report_also: [qoq]
+
+# 이벤트 스터디 윈도우 — 테스트한 것 전부 리포트 (절대 원칙 5)
+event_study:
+  estimation_window: 120      # 정상수익률 추정 기간 (거래일)
+  gap: 10                     # 추정 기간과 이벤트 사이 갭
+  car_windows:
+    - [-1, 1]
+    - [0, 5]
+    - [0, 20]
