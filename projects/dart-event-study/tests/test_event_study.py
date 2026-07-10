@@ -59,4 +59,39 @@ def test_summarize_flags_thin_sample():
     s = summarize_cars([0.01] * 5)
     assert s["N"] == 5 and s["thin_sample"] is True
     s2 = summarize_cars(list(rng.normal(0.02, 0.01, 100)))
-    assert s2["thin_sample"] is False and s2["p"] < 0.01
+    assert s2["thin_sample"] is False and s2["p_naive"] < 0.01
+
+
+def test_clustered_t_singleton_clusters_matches_naive():
+    from scipy import stats as sps
+
+    from dart_event_study.analysis.event_study import clustered_t
+
+    vals = list(rng.normal(0.02, 0.01, 80))
+    t_naive, _ = sps.ttest_1samp(vals, 0)
+    t_cl, _ = clustered_t(vals, clusters=range(80))  # 전부 싱글턴
+    assert t_cl == pytest.approx(float(t_naive), rel=1e-9)
+
+
+def test_clustered_t_shrinks_with_within_cluster_correlation():
+    from scipy import stats as sps
+
+    from dart_event_study.analysis.event_study import clustered_t
+
+    # 10개 클러스터, 클러스터 안 10개 값이 완전 동일 (상관 1) → 유효표본 10
+    base = rng.normal(0.02, 0.01, 10)
+    vals = np.repeat(base, 10)
+    clusters = np.repeat(range(10), 10)
+    t_naive, _ = sps.ttest_1samp(vals, 0)
+    t_cl, _ = clustered_t(vals, clusters)
+    # naive는 n=100인 척 부풀고, 클러스터 t는 유효표본 10 수준으로 축소돼야 함
+    assert abs(t_cl) < abs(float(t_naive)) / 2
+    t_eff, _ = sps.ttest_1samp(base, 0)  # 진짜 표본 10개의 t와 같은 규모
+    assert abs(t_cl) == pytest.approx(abs(float(t_eff)) * np.sqrt(10 / 9) / np.sqrt(10 / 9), rel=0.35)
+
+
+def test_clustered_t_single_cluster_returns_nan():
+    from dart_event_study.analysis.event_study import clustered_t
+
+    t, p = clustered_t([0.01, 0.02, 0.03], clusters=["a", "a", "a"])
+    assert np.isnan(t) and np.isnan(p)

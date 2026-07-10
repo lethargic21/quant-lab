@@ -64,17 +64,43 @@ def car(ar: pd.Series, window: tuple[int, int]) -> float:
 
 
 def summarize_cars(cars: list[float]) -> dict:
-    """이벤트 단면 CAR 통계: N, 평균, t, p, 양수비율."""
+    """이벤트 단면 CAR 통계: N, 평균, naive t/p, 양수비율.
+
+    ⚠️ naive t는 이벤트 간 독립을 가정 — 실적공시처럼 같은 날짜에 몰리는
+    이벤트는 잔차가 상관되어 과대추정된다. clustered_t와 병기할 것.
+    """
     arr = np.array(cars)
     n = len(arr)
     out = {"N": n, "mean_car": arr.mean() if n else np.nan, "pos_ratio": (arr > 0).mean() if n else np.nan}
     if n >= 2:
         t, p = stats.ttest_1samp(arr, 0)
-        out |= {"t": t, "p": p}
+        out |= {"t_naive": t, "p_naive": p}
     else:
-        out |= {"t": np.nan, "p": np.nan}
+        out |= {"t_naive": np.nan, "p_naive": np.nan}
     out["thin_sample"] = n < THIN_SAMPLE
     return out
+
+
+def clustered_t(values, clusters) -> tuple[float, float]:
+    """평균=0 가설의 클러스터-로버스트 t/p (CR1 보정, df = G−1).
+
+    상수항 회귀의 클러스터-로버스트 분산: Var(평균) = G/(G−1) × Σ_g(클러스터 잔차합)² / n².
+    클러스터가 전부 싱글턴이면 naive 분산과 일치한다 (검증: 테스트).
+    """
+    v = np.asarray(values, dtype=float)
+    n = len(v)
+    g = pd.Series(list(clusters))
+    n_g = g.nunique()
+    if n < 2 or n_g < 2:
+        return np.nan, np.nan
+    mean = v.mean()
+    cluster_sums = pd.Series(v - mean).groupby(g.values).sum()
+    var_mean = (n_g / (n_g - 1)) * float((cluster_sums**2).sum()) / n**2
+    if var_mean <= 0:
+        return np.nan, np.nan
+    t = mean / np.sqrt(var_mean)
+    p = 2 * stats.t.sf(abs(t), df=n_g - 1)
+    return float(t), float(p)
 
 
 def run_event_study(
@@ -116,7 +142,13 @@ def run_event_study(
 
         key = (sig["event_type"], int(sig["direction"]))
         ar_curves.setdefault(key, []).append(ar)
-        rec = {"event_type": sig["event_type"], "direction": int(sig["direction"])}
+        d0 = day0_ts[0].date()
+        rec = {
+            "event_type": sig["event_type"],
+            "direction": int(sig["direction"]),
+            "day0": d0.isoformat(),
+            "month": d0.strftime("%Y-%m"),  # 클러스터링 보정용
+        }
         for w in car_windows:
             rec[f"car_{w[0]}_{w[1]}"] = car(ar, w)
         per_event.append(rec)
@@ -125,7 +157,17 @@ def run_event_study(
     summary_rows = []
     for (etype, direction), grp in ev_df.groupby(["event_type", "direction"]):
         for w in car_windows:
-            s = summarize_cars(grp[f"car_{w[0]}_{w[1]}"].tolist())
+            cars = grp[f"car_{w[0]}_{w[1]}"]
+            s = summarize_cars(cars.tolist())
+            # 이벤트 날짜 뭉침(cross-sectional dependence) 보정 — naive와 병기
+            t_day, p_day = clustered_t(cars, grp["day0"])
+            t_mon, p_mon = clustered_t(cars, grp["month"])
+            s |= {
+                "t_cl_day": t_day, "p_cl_day": p_day,
+                "n_cl_day": grp["day0"].nunique(),
+                "t_cl_month": t_mon, "p_cl_month": p_mon,
+                "n_cl_month": grp["month"].nunique(),
+            }
             summary_rows.append({"event_type": etype, "direction": direction, "window": f"[{w[0]},{w[1]}]"} | s)
     summary = pd.DataFrame(summary_rows)
 
