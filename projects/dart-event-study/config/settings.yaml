@@ -43,6 +43,10 @@ direction_rules:
     surprise_metric: yoy
     report_also: [qoq]
 
+# 백테스트 — 테스트한 보유기간 전부 리포트 (절대 원칙 5)
+backtest:
+  holding_days: [5, 20]       # 거래일 기준 보유기간 (진입: 시그널일 종가)
+
 # 이벤트 스터디 윈도우 — 테스트한 것 전부 리포트 (절대 원칙 5)
 event_study:
   estimation_window: 120      # 정상수익률 추정 기간 (거래일)
