@@ -18,7 +18,7 @@ from dart_event_study.signals.timing import execution_date
 
 def build_signals(events: pd.DataFrame, calendar: TradingCalendar) -> tuple[pd.DataFrame, dict]:
     """이벤트 → 시그널. (시그널 df, 제외 사유 카운트) 반환."""
-    dropped = {"direction_없음": 0, "direction_중립": 0, "기간말_체결불가": 0}
+    dropped = {"direction_없음": 0, "direction_중립": 0, "실적_qoq폴백_제외": 0, "기간말_체결불가": 0}
     rows = []
     for _, ev in events.iterrows():
         if pd.isna(ev["direction"]):
@@ -26,6 +26,11 @@ def build_signals(events: pd.DataFrame, calendar: TradingCalendar) -> tuple[pd.D
             continue
         if ev["direction"] == 0:
             dropped["direction_중립"] += 1
+            continue
+        # v1.1 [3]: QoQ 폴백은 계절성을 서프라이즈로 오인할 수 있어 시그널에서 제외
+        # (YoY와 다른 것을 측정 — 68건, 1.6%. 제외 전후 민감도는 README·노트북에 기록)
+        if ev["event_type"] == "earnings" and ev.get("surprise_basis") == "qoq":
+            dropped["실적_qoq폴백_제외"] += 1
             continue
         rcept_date = dt.datetime.strptime(ev["rcept_dt"], "%Y%m%d").date()
         try:
