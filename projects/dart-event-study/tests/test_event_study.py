@@ -90,6 +90,22 @@ def test_clustered_t_shrinks_with_within_cluster_correlation():
     assert abs(t_cl) == pytest.approx(abs(float(t_eff)) * np.sqrt(10 / 9) / np.sqrt(10 / 9), rel=0.35)
 
 
+def test_bh_fdr():
+    from dart_event_study.analysis.event_study import bh_fdr
+
+    # 교과서 예: p=[0.01, 0.02, 0.03, 0.04] m=4 → q=[0.04, 0.04, 0.04, 0.04]
+    q = bh_fdr([0.01, 0.02, 0.03, 0.04])
+    assert q == pytest.approx([0.04, 0.04, 0.04, 0.04])
+    # 강한 신호는 살아남고 경계 신호는 커짐
+    q2 = bh_fdr([0.0001, 0.04, 0.5, np.nan])
+    assert q2[0] == pytest.approx(0.0003)
+    assert q2[1] == pytest.approx(0.06)  # 0.04 * 3/2
+    assert q2[2] == pytest.approx(0.5)
+    assert np.isnan(q2[3])
+    # 순서 불변성
+    assert bh_fdr([0.5, 0.0001, 0.04])[1] == pytest.approx(0.0003)
+
+
 def test_clustered_t_single_cluster_returns_nan():
     from dart_event_study.analysis.event_study import clustered_t
 

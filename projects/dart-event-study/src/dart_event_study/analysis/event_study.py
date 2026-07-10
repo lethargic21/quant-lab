@@ -81,6 +81,32 @@ def summarize_cars(cars: list[float]) -> dict:
     return out
 
 
+def bh_fdr(pvals: list[float]) -> list[float]:
+    """Benjamini–Hochberg FDR 보정 q값 (v1.2 #4 — 다중검정).
+
+    15개 검정(5그룹×3윈도우)을 동시에 보므로 경계 p값(0.01~0.05)은
+    우연 기대치와 겹칠 수 있다 — q값을 p와 병기해 탈락은 탈락대로 리포트.
+    NaN p는 NaN q로 통과.
+    """
+    import numpy as np
+
+    p = np.asarray(pvals, dtype=float)
+    q = np.full_like(p, np.nan)
+    valid = ~np.isnan(p)
+    pv = p[valid]
+    m = len(pv)
+    if m == 0:
+        return q.tolist()
+    order = np.argsort(pv)
+    ranked = pv[order] * m / (np.arange(m) + 1)
+    # 단조화 (뒤에서부터 누적 최소)
+    ranked = np.minimum.accumulate(ranked[::-1])[::-1]
+    qv = np.empty(m)
+    qv[order] = np.clip(ranked, 0, 1)
+    q[valid] = qv
+    return q.tolist()
+
+
 def clustered_t(values, clusters) -> tuple[float, float]:
     """평균=0 가설의 클러스터-로버스트 t/p (CR1 보정, df = G−1).
 
@@ -170,6 +196,8 @@ def run_event_study(
             }
             summary_rows.append({"event_type": etype, "direction": direction, "window": f"[{w[0]},{w[1]}]"} | s)
     summary = pd.DataFrame(summary_rows)
+    # 다중검정 보정 (v1.2 #4): 표 전체(전 그룹×윈도우)를 한 패밀리로 BH-FDR
+    summary["q_cl_month"] = bh_fdr(summary["p_cl_month"].tolist())
 
     aar_rows = []
     for (etype, direction), curves in ar_curves.items():
