@@ -9,7 +9,7 @@
 #      → FDR StockListing("KOSPI") 시총 상위 200 보통주로 근사
 #   2. 조회 시점 스냅샷 — 과거 편입/편출 미반영 (survivorship bias)
 
-mode: debug
+mode: full
 
 full_size: 200
 
