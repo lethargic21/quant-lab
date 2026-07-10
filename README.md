@@ -10,7 +10,7 @@
 
 | Project | Description | Status |
 |---------|-------------|--------|
-| [`dart-event-study`](./projects/dart-event-study) | DART 공시 이벤트(자사주매입·유상증자·실적) → 시그널 → 이벤트 스터디 + 백테스트 (KOSPI200) | 🚧 WIP |
+| [`dart-event-study`](./projects/dart-event-study) | DART 공시 이벤트(자사주매입·유상증자·실적) → 시그널 → 이벤트 스터디 + 백테스트 (KOSPI200) | ✅ v1 |
 
 ## Stack
 
@@ -18,6 +18,6 @@ Python 3.11+ · pykrx / FinanceDataReader · OpenDART · uv
 
 ## Roadmap
 
-- [ ] DART 이벤트 스터디 (진행 중)
+- [x] DART 이벤트 스터디 (v1 — 자사주 드리프트만 비용 생존, 상세는 프로젝트 README)
 - [ ] 이벤트에 대한 뉴스·개미 반응 감성 레이어
 - [ ] 팩터 라이브러리 (밸류·모멘텀·퀄리티·로우볼)
