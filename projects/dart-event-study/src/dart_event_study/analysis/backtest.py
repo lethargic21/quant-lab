@@ -31,12 +31,14 @@ def main() -> None:
     store = PriceStore(DATA_DIR / "prices", start, end)
     closes = pd.DataFrame({t: store.ohlcv(t)["close"] for t in signals["ticker"].unique()})
 
+    delist_discount = settings["backtest"].get("delist_discount")
+
     rows = []
     for holding in settings["backtest"]["holding_days"]:
         scopes = [("all", signals)] + [(et, g) for et, g in signals.groupby("event_type")]
         for scope, sig in scopes:
             for variant, lo in [("long_short", False), ("long_only", True)]:
-                res = run_backtest(sig, closes, holding, cost, long_only=lo)
+                res = run_backtest(sig, closes, holding, cost, long_only=lo, delist_discount=delist_discount)
                 m = res.metrics()
                 rows.append({"scope": scope, "H": holding, "variant": variant} | {c: m.get(c) for c in COLS})
                 if scope == "all":  # 비용 영향 확인용 gross 병기
