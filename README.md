@@ -10,7 +10,7 @@
 
 | Project | Description | Status |
 |---------|-------------|--------|
-| [`dart-event-study`](./projects/dart-event-study) | DART 공시 이벤트(자사주매입·유상증자·실적) → 시그널 → 이벤트 스터디 + 백테스트 (KOSPI200) | ✅ v1 |
+| [`dart-event-study`](./projects/dart-event-study) | DART 공시 이벤트(자사주매입·유상증자·실적) → 시그널 → 이벤트 스터디 + 백테스트 (KOSPI200) | ✅ v1.2 |
 
 ## Stack
 
