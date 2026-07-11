@@ -111,6 +111,25 @@ def main() -> None:
                              "mdd": ks["mdd"], "n_trades": None})
         print(pd.DataFrame(sub_rows).to_string(index=False))
 
+    # v1.2 [3-보완] 슬리피지 민감도 — 시장충격을 모델링하는 대신 범위로 정직하게 제시
+    print("\n슬리피지 민감도 (편도, 자사주 H=5 / all H=5 long-short):")
+    sens_rows = []
+    for slip in (0.001, 0.003, 0.005):
+        cost_s = CostModel(
+            transaction_tax=c["transaction_tax"], slippage=slip,
+            commission=c.get("commission", 0.0),
+            tax_schedule=cost.tax_schedule,
+        )
+        for scope, sg, lo in [("buyback", signals[signals.event_type == "buyback"], False),
+                              ("all", signals, False)]:
+            r = run_backtest(sg, closes, 5, cost_s, long_only=lo,
+                             delist_discount=delist_discount, delist_tickers=delist_tickers,
+                             volumes=volumes)
+            m = r.metrics()
+            sens_rows.append({"slippage": f"{slip:.1%}", "scope": scope,
+                              "ann_return": m["ann_return"], "sharpe": m["sharpe"]})
+    print(pd.DataFrame(sens_rows).to_string(index=False))
+
 
 if __name__ == "__main__":
     main()
