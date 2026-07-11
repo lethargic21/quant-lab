@@ -46,6 +46,8 @@ def run_backtest(
     long_only: bool = False,
     delist_discount: float | None = None,
     delist_tickers: set[str] | None = None,
+    volumes: pd.DataFrame | None = None,
+    roll_limit: int = 5,
 ) -> BacktestResult:
     """signals: (ticker, signal_date, direction) — signal_date에 종가 진입.
     closes: 일별 종가 wide 테이블 (index=date, columns=ticker).
@@ -58,6 +60,10 @@ def run_backtest(
     delist_tickers (v1.2 #2): 청산 할인을 적용할 '손실형 상폐' 티커 집합.
     None이면 조기 종단 전체에 할인(레거시). 합병·완전자회사화 상폐는 보유자가
     대가를 받으므로 이 집합에서 빼면 할인 없이 마지막 가격으로 청산된다.
+
+    volumes (v1.2 #7): 일별 거래량 wide 테이블. 주어지면 거래량 0(거래정지) 또는
+    가격 결측일에는 체결 불가 — 진입/청산을 다음 거래 가능일로 민다(최대 roll_limit
+    거래일, 진입이 한도를 넘으면 트레이드 포기). None이면 기존 동작.
     """
     sig = signals.copy()
     if long_only:
@@ -98,7 +104,28 @@ def run_backtest(
         i = dates.searchsorted(pd.Timestamp(s["signal_date"]))
         if i >= len(dates) or dates[i].date() != pd.Timestamp(s["signal_date"]).date():
             continue  # 진입일에 가격 없음
+
+        def _tradeable(t: str, k: int) -> bool:
+            if pd.isna(closes[t].iloc[k]):
+                return False
+            if volumes is not None and t in volumes.columns:
+                v = volumes[t].iloc[k]
+                return bool(pd.notna(v) and v > 0)
+            return True
+
+        # v1.2 #7: 정지일 체결 불가 — 진입을 다음 거래 가능일로 (한도 초과 시 포기)
+        if volumes is not None:
+            i_max = min(i + roll_limit, len(dates) - 1)
+            while i <= i_max and not _tradeable(t, i):
+                i += 1
+            if i > i_max or not _tradeable(t, i):
+                continue
+
         j = min(i + holding_days, len(dates) - 1)
+        # 청산일이 정지일이면 다음 거래 가능일로 (기간 끝/상폐 경계는 아래 로직이 처리)
+        if volumes is not None:
+            while j < len(dates) - 1 and not _tradeable(t, j) and j - i - holding_days < roll_limit:
+                j += 1
         delisted = False
         if delist_discount is not None and ends_early[t] and j >= last_idx[t]:
             j, delisted = last_idx[t], True  # 마지막 거래일에 강제 청산

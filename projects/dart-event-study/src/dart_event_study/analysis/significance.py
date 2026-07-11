@@ -104,6 +104,11 @@ def main() -> None:
     signals = pd.read_parquet(DATA_DIR / f"signals_{mode}.parquet")
     store = PriceStore(DATA_DIR / "prices", start, end)
     closes = pd.DataFrame({t: store.ohlcv(t)["close"] for t in signals["ticker"].unique()})
+    volumes = (
+        pd.DataFrame({t: store.ohlcv(t)["volume"] for t in signals["ticker"].unique()})
+        if settings["backtest"].get("roll_suspended")
+        else None
+    )
 
     delist_tickers = None
     if mode == "full" and universe.get("selection") == "proxy_2019":
@@ -116,6 +121,7 @@ def main() -> None:
         signals[signals.event_type == "buyback"], closes, 5, cost,
         delist_discount=settings["backtest"].get("delist_discount"),
         delist_tickers=delist_tickers,
+        volumes=volumes,
     )
     boot = block_bootstrap_sharpe(res.daily_net)
 

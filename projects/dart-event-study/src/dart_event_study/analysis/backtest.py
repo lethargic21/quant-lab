@@ -37,6 +37,11 @@ def main() -> None:
     signals = pd.read_parquet(DATA_DIR / f"signals_{mode}.parquet")
     store = PriceStore(DATA_DIR / "prices", start, end)
     closes = pd.DataFrame({t: store.ohlcv(t)["close"] for t in signals["ticker"].unique()})
+    volumes = (
+        pd.DataFrame({t: store.ohlcv(t)["volume"] for t in signals["ticker"].unique()})
+        if settings["backtest"].get("roll_suspended")
+        else None
+    )
 
     delist_discount = settings["backtest"].get("delist_discount")
     # 손실형 상폐만 청산 할인 (proxy_2019 유니버스일 때 — 합병 상폐는 무할인 청산)
@@ -56,6 +61,7 @@ def main() -> None:
                 res = run_backtest(
                     sig, closes, holding, cost, long_only=lo,
                     delist_discount=delist_discount, delist_tickers=delist_tickers,
+                    volumes=volumes,
                 )
                 m = res.metrics()
                 rows.append({"scope": scope, "H": holding, "variant": variant} | {c: m.get(c) for c in COLS})
@@ -92,7 +98,8 @@ def main() -> None:
             for scope, sg in [("all", sub_sig), ("buyback", sub_sig[sub_sig.event_type == "buyback"])]:
                 for holding in settings["backtest"]["holding_days"]:
                     r = run_backtest(sg, sub_closes, holding, cost,
-                                     delist_discount=delist_discount, delist_tickers=delist_tickers)
+                                     delist_discount=delist_discount, delist_tickers=delist_tickers,
+                                     volumes=volumes.loc[a:b] if volumes is not None else None)
                     m = r.metrics()
                     sub_rows.append({"period": f"{a[:4]}-{b[2:4]}", "scope": scope, "H": holding,
                                      "ann_return": m["ann_return"], "sharpe": m["sharpe"],
