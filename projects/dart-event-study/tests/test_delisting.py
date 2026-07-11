@@ -62,6 +62,27 @@ def test_discount_off_preserves_legacy_behavior():
     assert res.daily_gross.sum() == pytest.approx(0.0)  # 기존: 손실 미반영 (이게 문제였음을 명시)
 
 
+def test_merger_delisting_forced_exit_without_discount():
+    # v1.2 [2]: 합병·완전자회사화 상폐 = 손실형 집합에 없음 → 강제 청산은 하되 할인 없음
+    res = run_backtest(
+        sig(), delisted_closes(), holding_days=20, cost=NO_COST,
+        delist_discount=0.30, delist_tickers={"OTHER"},  # A는 손실형 아님
+    )
+    tr = res.trades.iloc[0]
+    assert tr["delisted"] == True  # noqa: E712
+    assert tr["exit"] == DATES[14].date()
+    assert tr["gross_ret"] == pytest.approx(0.0)  # 마지막 가격 청산, 무할인
+    assert res.daily_gross.sum() == pytest.approx(0.0)
+
+
+def test_loss_set_membership_applies_discount():
+    res = run_backtest(
+        sig(), delisted_closes(), holding_days=20, cost=NO_COST,
+        delist_discount=0.30, delist_tickers={"A"},
+    )
+    assert res.trades.iloc[0]["gross_ret"] == pytest.approx(-0.30)
+
+
 def test_short_position_discount_gains():
     # 숏 보유 중 상폐 → 청산 할인은 숏에 이익 (방향 부호 반영)
     res = run_backtest(sig(direction=-1), delisted_closes(), holding_days=20, cost=NO_COST, delist_discount=0.30)

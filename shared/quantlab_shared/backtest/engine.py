@@ -45,14 +45,19 @@ def run_backtest(
     cost: CostModel,
     long_only: bool = False,
     delist_discount: float | None = None,
+    delist_tickers: set[str] | None = None,
 ) -> BacktestResult:
     """signals: (ticker, signal_date, direction) — signal_date에 종가 진입.
     closes: 일별 종가 wide 테이블 (index=date, columns=ticker).
 
-    delist_discount (v1.2 #1): 가격이 기간 끝 전에 끊기는 종목(상폐 추정)을 보유 중이면
-    마지막 유효 가격 × (1 − discount)로 강제 청산. None이면 기존 동작(할인 없음) —
+    delist_discount (v1.2 #1): 가격이 기간 끝 전에 끊기는 종목(상폐 등)을 보유 중이면
+    마지막 유효 가격에서 강제 청산. None이면 기존 동작(강제청산·할인 없음) —
     이 경우 NaN 수익률이 조용히 0 취급되어 상폐 손실이 누락되므로, survivorship이
     보정된 유니버스에서는 반드시 켤 것.
+
+    delist_tickers (v1.2 #2): 청산 할인을 적용할 '손실형 상폐' 티커 집합.
+    None이면 조기 종단 전체에 할인(레거시). 합병·완전자회사화 상폐는 보유자가
+    대가를 받으므로 이 집합에서 빼면 할인 없이 마지막 가격으로 청산된다.
     """
     sig = signals.copy()
     if long_only:
@@ -70,10 +75,13 @@ def run_backtest(
         last_idx[t] = li
         ends_early[t] = 0 <= li < len(dates) - 1
 
+    def _loss_type(t: str) -> bool:
+        return delist_tickers is None or t in delist_tickers
+
     rets_adj = rets.copy()
     if delist_discount is not None:
         for t, early in ends_early.items():
-            if early:
+            if early and _loss_type(t):
                 li = last_idx[t]
                 base = rets.iloc[li, rets.columns.get_loc(t)]
                 base = 0.0 if pd.isna(base) else base
@@ -93,11 +101,12 @@ def run_backtest(
         j = min(i + holding_days, len(dates) - 1)
         delisted = False
         if delist_discount is not None and ends_early[t] and j >= last_idx[t]:
-            j, delisted = last_idx[t], True  # 마지막 거래일에 강제 청산 (할인 적용)
+            j, delisted = last_idx[t], True  # 마지막 거래일에 강제 청산
         if j <= i or pd.isna(closes[t].iloc[i]) or pd.isna(closes[t].iloc[j]):
             continue
         pos.iloc[i + 1 : j + 1, pos.columns.get_loc(t)] += s["direction"]
-        exit_mult = (1 - delist_discount) if delisted else 1.0
+        # 할인은 손실형 상폐에만 — 합병 등은 마지막 가격 청산 (대가 수령)
+        exit_mult = (1 - delist_discount) if (delisted and _loss_type(t)) else 1.0
         gross = (closes[t].iloc[j] * exit_mult / closes[t].iloc[i] - 1) * s["direction"]
         trades.append(
             {
@@ -107,7 +116,8 @@ def run_backtest(
                 "direction": s["direction"],
                 "delisted": delisted,
                 "gross_ret": gross,
-                "net_ret": gross - cost.round_trip,
+                # 세율은 매도일 기준 (tax_schedule 없으면 상수와 동일)
+                "net_ret": gross - cost.round_trip_at(dates[j].date()),
             }
         )
 
@@ -121,7 +131,9 @@ def run_backtest(
 
     dw = weights.diff().fillna(weights)
     buys, sells = dw.clip(lower=0), (-dw).clip(lower=0)  # 가중치 증가=매수, 감소=매도
-    daily_cost = buys.sum(axis=1) * cost.buy_cost + sells.sum(axis=1) * cost.sell_cost
+    # 매도 비용은 해당 일자의 세율 적용 (스케줄 없으면 상수와 동일)
+    sell_cost_by_day = pd.Series([cost.sell_cost_at(d.date()) for d in dates], index=dates)
+    daily_cost = buys.sum(axis=1) * cost.buy_cost + sells.sum(axis=1) * sell_cost_by_day
     daily_net = daily_gross - daily_cost
 
     n_days = max(len(dates) - 1, 1)

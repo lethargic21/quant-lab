@@ -22,13 +22,28 @@ def load_universe() -> dict:
 
 
 def resolve_tickers(universe: dict | None = None) -> list[str]:
-    """mode에 따라 디버그 서브셋 또는 KOSPI200 전체(현재 스냅샷) 반환."""
+    """mode/selection에 따라 유니버스 티커 반환."""
     universe = universe or load_universe()
     if universe["mode"] == "debug":
         return list(universe["debug_tickers"])
+
+    if universe.get("selection", "snapshot_current") == "proxy_2019":
+        return resolve_universe_asof(universe)["tickers"]
     from quantlab_shared.data.universe import get_kospi_top_n
 
     return get_kospi_top_n(universe["full_size"], cache_dir=DATA_DIR / "universe")
+
+
+def resolve_universe_asof(universe: dict | None = None) -> dict:
+    """proxy_2019 유니버스 전체 메타데이터 (tickers / delisted / delisted_loss).
+
+    delisted_loss는 백테스트 청산 할인 대상 (손실형 상폐만).
+    """
+    universe = universe or load_universe()
+    from quantlab_shared.data.universe import get_kospi_top_n_asof
+
+    asof = load_settings()["period"]["start"]
+    return get_kospi_top_n_asof(universe["full_size"], asof=asof, cache_dir=DATA_DIR / "universe")
 
 
 def get_api_key() -> str:

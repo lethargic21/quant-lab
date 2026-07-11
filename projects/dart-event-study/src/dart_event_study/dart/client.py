@@ -43,26 +43,39 @@ class DartClient:
             time.sleep(wait)
         self._last_call = time.monotonic()
 
+    def _request(self, endpoint: str, timeout: int, **params) -> requests.Response:
+        """스로틀 + 일시적 연결 오류 재시도 (장시간 연속 호출 시 서버가 끊는 경우 실측).
+
+        재시도 시 세션을 새로 만들어 끊긴 keep-alive 커넥션을 버린다.
+        """
+        last_exc: Exception | None = None
+        for attempt, backoff in enumerate((0, 3, 10)):
+            if backoff:
+                time.sleep(backoff)
+                self._session = requests.Session()
+            self._throttle()
+            try:
+                r = self._session.get(
+                    f"{BASE_URL}/{endpoint}",
+                    params={"crtfc_key": self.api_key, **params},
+                    timeout=timeout,
+                )
+                r.raise_for_status()
+                return r
+            except (requests.ConnectionError, requests.Timeout) as e:
+                last_exc = e
+        raise DartError(f"{endpoint}: 재시도 3회 실패 — {last_exc}")
+
     def _get(self, endpoint: str, **params) -> dict:
         """json 엔드포인트 호출. status 000/013 외에는 DartError."""
-        self._throttle()
-        r = self._session.get(
-            f"{BASE_URL}/{endpoint}", params={"crtfc_key": self.api_key, **params}, timeout=30
-        )
-        r.raise_for_status()
-        data = r.json()
+        data = self._request(endpoint, timeout=30, **params).json()
         status = data.get("status")
         if status not in (STATUS_OK, STATUS_NO_DATA):
             raise DartError(f"{endpoint} status={status}: {data.get('message')}")
         return data
 
     def _get_bytes(self, endpoint: str, **params) -> bytes:
-        self._throttle()
-        r = self._session.get(
-            f"{BASE_URL}/{endpoint}", params={"crtfc_key": self.api_key, **params}, timeout=60
-        )
-        r.raise_for_status()
-        return r.content
+        return self._request(endpoint, timeout=60, **params).content
 
     def _cached_json(self, name: str, fetch) -> dict | list:
         path = self.cache_dir / f"{name}.json"
