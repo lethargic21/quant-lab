@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import random
 import re
 import time
 from pathlib import Path
@@ -51,10 +52,15 @@ def fetch_event_news(
     rcept_date: dt.date,
     cache_dir: Path,
     session: requests.Session | None = None,
-    max_pages: int = 3,
-    throttle: float = 0.8,
+    max_pages: int = 2,
+    throttle: float = 2.5,
 ) -> dict:
-    """이벤트 창([-1,+1] 달력일) '회사명 자사주' 기사 수집. 캐시 우선."""
+    """이벤트 창([-1,+1] 달력일) '회사명 자사주' 기사 수집. 캐시 우선.
+
+    네이버 소프트 차단(403 — 실측: ~55이벤트 후 페이지네이션에서 발생) 대응:
+    스로틀 2.5초+지터, 페이지 상한 2(기사 상한 ~20 — 삼분위엔 충분),
+    403 시 60초 백오프 + 새 세션으로 2회 재시도.
+    """
     cache_dir.mkdir(parents=True, exist_ok=True)
     key = f"{corp_name}_{rcept_date.isoformat()}".replace(" ", "")
     path = cache_dir / f"{key}.json"
@@ -66,16 +72,23 @@ def fetch_event_news(
     de = (rcept_date + dt.timedelta(days=1)).strftime("%Y.%m.%d")
     articles: dict[str, str] = {}
     for page in range(max_pages):
-        time.sleep(throttle)
-        r = session.get(
-            "https://search.naver.com/search.naver",
-            params={
-                "where": "news", "query": f"{corp_name} 자사주", "sm": "tab_opt",
-                "sort": "0", "pd": "3", "ds": ds, "de": de, "start": str(page * 10 + 1),
-            },
-            headers={"User-Agent": UA},
-            timeout=20,
-        )
+        time.sleep(throttle + random.uniform(0, 1.5))
+        r = None
+        for backoff in (0, 60, 120):
+            if backoff:
+                time.sleep(backoff)
+                session = requests.Session()  # 차단된 세션 폐기
+            r = session.get(
+                "https://search.naver.com/search.naver",
+                params={
+                    "where": "news", "query": f"{corp_name} 자사주", "sm": "tab_opt",
+                    "sort": "0", "pd": "3", "ds": ds, "de": de, "start": str(page * 10 + 1),
+                },
+                headers={"User-Agent": UA, "Accept-Language": "ko-KR,ko;q=0.9"},
+                timeout=20,
+            )
+            if r.status_code != 403:
+                break
         r.raise_for_status()
         before = len(articles)
         articles.update(_parse_articles(r.text))

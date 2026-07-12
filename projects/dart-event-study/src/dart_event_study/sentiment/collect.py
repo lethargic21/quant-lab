@@ -32,15 +32,19 @@ def main() -> None:
         if not name:
             continue
         d = dt.date(int(ev["rcept_dt"][:4]), int(ev["rcept_dt"][4:6]), int(ev["rcept_dt"][6:]))
-        news = fetch_event_news(name, d, DATA_DIR / "news", session=session)
+        try:
+            news = fetch_event_news(name, d, DATA_DIR / "news", session=session)
+            metrics = {"n_articles": news["n_articles"], **score_titles(news["titles"])}
+        except Exception as e:  # 재시도 후에도 차단 — 결측 기록하고 계속 (재실행 시 캐시 이어받기)
+            print(f"  [skip] {name} {d}: {type(e).__name__}")
+            metrics = {"n_articles": None, "sent_score": None, "n_pos": None, "n_neg": None}
         rows.append(
             {
                 "rcept_no": ev["rcept_no"],
                 "ticker": ev["ticker"],
                 "event_type": ev["event_type"],
                 "rcept_dt": ev["rcept_dt"],
-                "n_articles": news["n_articles"],
-                **score_titles(news["titles"]),
+                **metrics,
             }
         )
         if i % 25 == 0:
