@@ -3,9 +3,9 @@
 DART 전자공시에서 이벤트(자사주매입 / 유상증자 / 실적공시)를 감지해 구조화 정보를
 추출하고, 이벤트 스터디와 백테스트로 검증한 엔드투엔드 파이프라인.
 유니버스는 **2019-01 기준** KOSPI 시총 상위 200 보통주(상폐 종목 포함 — v1.2 survivorship 보정),
-기간 2019–2024. 설계 이력은 [PLAN.md](./PLAN.md), 신뢰도 진단·보정 내역은
-[RELIABILITY_AUDIT.md](./RELIABILITY_AUDIT.md), 결과 상세는
-[notebooks/report.ipynb](./notebooks/report.ipynb).
+기간 2019–2024. **프로젝트 전체 여정 요약은 [notebooks/journey.ipynb](./notebooks/journey.ipynb)**,
+결과 상세는 [notebooks/report.ipynb](./notebooks/report.ipynb), 설계 이력은 [PLAN.md](./PLAN.md),
+신뢰도 진단·보정 내역은 [RELIABILITY_AUDIT.md](./RELIABILITY_AUDIT.md).
 
 ## 결과 요약 (v1.2 — 신뢰도 보정 후)
 
