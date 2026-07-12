@@ -13,7 +13,7 @@ import pandas as pd
 from dart_event_study.collect import year_slices
 from dart_event_study.config import DATA_DIR, get_api_key, load_settings, load_universe, resolve_tickers
 from dart_event_study.dart.client import DartClient
-from dart_event_study.events.buyback import extract_buybacks
+from dart_event_study.events.buyback import extract_buybacks, extract_trust_buybacks
 from dart_event_study.events.earnings import extract_earnings
 from dart_event_study.events.rights import extract_rights_offerings
 
@@ -29,6 +29,19 @@ def main() -> None:
     cmap = client.corp_code_map()
     disclosures = pd.read_parquet(DATA_DIR / f"disclosures_{mode}.parquet")
 
+    # 신탁 자사주 강도용 전일 종가 (캐시된 가격 — look-ahead 없음)
+    from quantlab_shared.data.prices import PriceStore
+
+    store = PriceStore(DATA_DIR / "prices", start, end)
+
+    def prev_close(ticker: str, d) -> float | None:
+        try:
+            s = store.ohlcv(ticker)["close"]
+        except Exception:
+            return None
+        i = s.index.searchsorted(pd.Timestamp(d))
+        return float(s.iloc[i - 1]) if i > 0 else None
+
     events: list[dict] = []
     for t in tickers:
         if t not in cmap:
@@ -36,6 +49,7 @@ def main() -> None:
         cc = cmap[t]["corp_code"]
         for bgn, ende in year_slices(start, end):
             events += extract_buybacks(client, t, cc, bgn, ende)
+            events += extract_trust_buybacks(client, t, cc, bgn, ende, prev_close)
             events += extract_rights_offerings(client, t, cc, bgn, ende, ro_rules)
     events += extract_earnings(client, disclosures)
 

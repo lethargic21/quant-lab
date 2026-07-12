@@ -1,13 +1,16 @@
-"""자사주매입(직접취득) 이벤트 추출 — tsstkAqDecsn 구조화 API.
+"""자사주매입 이벤트 추출 — 직접취득(tsstkAqDecsn) + 신탁계약(tsstkAqTrctrCnsDecsn).
 
-방향 = +1 고정 (호재), 강도 = 취득예정주식수(보통주) / 발행주식총수.
-신탁계약 방식(tsstkAqTrctrCnsDecsn)은 디버그 셋에 표본이 없어 미구현 —
-full 실행에서 표본이 나오면 추가한다 (PLAN §7-2 참고).
+방향 = +1 고정 (호재).
+- 직접취득 강도 = 취득예정주식수(보통주) / 발행주식총수
+- 신탁 강도   = 계약금액 / (접수 전일종가 × 발행총수) — 신탁 공시는 금액 기반(실측),
+  전일 종가만 사용하므로 look-ahead 없음. event_type을 buyback_trust로 분리해
+  직접취득과 섞지 않고 각각 리포트한다 (v1.2 결론과의 비교 가능성 유지).
 """
 
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable
 
 from dart_event_study.dart.client import DartClient
 from dart_event_study.events.parse import num
@@ -38,6 +41,42 @@ def extract_buybacks(
                 "total_shares": total,
                 "method": (r.get("aq_mth") or "").strip(),
                 "purpose": (r.get("aq_pp") or "").strip(),
+            }
+        )
+    return events
+
+
+def extract_trust_buybacks(
+    client: DartClient,
+    ticker: str,
+    corp_code: str,
+    bgn_de: str,
+    end_de: str,
+    prev_close: Callable[[str, dt.date], float | None],
+) -> list[dict]:
+    """신탁계약 방식 자사주 — 계약금액 기반. prev_close(ticker, date) = 접수 전일 종가."""
+    events = []
+    for r in client.structured("tsstkAqTrctrCnsDecsn.json", corp_code, bgn_de, end_de):
+        rcept_no = r["rcept_no"]
+        rcept_dt = rcept_no[:8]
+        d = dt.date(int(rcept_dt[:4]), int(rcept_dt[4:6]), int(rcept_dt[6:]))
+        amount = num(r.get("ctr_prc"))
+        total = total_shares_before(client, corp_code, d)
+        px = prev_close(ticker, d)
+        strength = amount / (px * total) if (amount and total and px) else None
+        events.append(
+            {
+                "ticker": ticker,
+                "corp_code": corp_code,
+                "rcept_no": rcept_no,
+                "rcept_dt": rcept_dt,
+                "event_type": "buyback_trust",
+                "direction": 1,
+                "strength": strength,
+                "plan_amount": amount,
+                "total_shares": total,
+                "prev_close": px,
+                "purpose": (r.get("ctr_pp") or "").strip(),
             }
         )
     return events
