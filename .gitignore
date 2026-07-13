@@ -12,3 +12,7 @@ __pycache__/
 
 # data snapshots / caches (재현은 코드+API로, 캐시는 커밋 안 함)
 projects/*/data/
+
+# 정찰용 원문 텍스트 — 절대 커밋 금지 (저작권·개인정보)
+data/raw/
+**/data/raw/
