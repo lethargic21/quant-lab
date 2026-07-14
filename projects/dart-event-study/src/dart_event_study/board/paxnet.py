@@ -74,20 +74,35 @@ class PaxnetBoard:
         self._session.headers.update({"User-Agent": UA})
 
     def _fetch(self, code: str, page: int) -> str:
+        """403 = 차단 신호 → 1회 백오프 후 지속 시 중단 (우회 금지).
+
+        ConnectionReset(10054) = 장시간 세션의 keep-alive 종료로 실측됨(175페이지 후 발생)
+        → 연결 오류에 한해 60초 대기 + 새 세션 1회 재시도. 재발하면 소프트 스로틀
+        가능성으로 간주하고 중단·보고 (공격적 재시도 금지).
+        """
+        last_exc: Exception | None = None
         for backoff in (0, 60):
             if backoff:
                 time.sleep(backoff)
                 self._session = requests.Session()
                 self._session.headers.update({"User-Agent": UA})
             time.sleep(self.throttle + random.uniform(0, 1.0))
-            r = self._session.get(
-                "https://www.paxnet.co.kr/tbbs/list",
-                params={"id": code, "tbbsType": "L", "page": str(page)},
-                timeout=20,
-            )
+            try:
+                r = self._session.get(
+                    "https://www.paxnet.co.kr/tbbs/list",
+                    params={"id": code, "tbbsType": "L", "page": str(page)},
+                    timeout=20,
+                )
+            except (requests.ConnectionError, requests.Timeout) as e:
+                last_exc = e
+                continue
             if r.status_code != 403:
                 r.raise_for_status()
                 return r.text
+        if last_exc:
+            raise RuntimeError(
+                f"팍스넷 연결 오류 재발 (code={code}, page={page}) — 소프트 스로틀 가능성, 중단: {last_exc}"
+            )
         raise RuntimeError(f"팍스넷 403 지속 (code={code}, page={page}) — 우회하지 않고 중단")
 
     def list_page(self, code: str, page: int) -> list[dict]:
