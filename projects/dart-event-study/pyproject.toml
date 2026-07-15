@@ -12,6 +12,7 @@ dependencies = [
     "pyyaml>=6.0",
     "scipy>=1.11",
     "matplotlib>=3.8",
+    "playwright>=1.61.0",
 ]
 
 [dependency-groups]

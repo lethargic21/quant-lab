@@ -1,0 +1,34 @@
+# Toss crawl single-run wrapper (called by Task Scheduler).
+# ASCII-only on purpose: this runs headless for weeks; no non-ASCII to avoid
+# PowerShell codepage/encoding breakage. On failure (exit!=0) it raises an alert
+# (marker file + Windows balloon) -- silent death is the biggest operational risk.
+$ErrorActionPreference = "Stop"
+$repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent  # .../quant-lab
+Set-Location $repo
+$env:PYTHONIOENCODING = "utf-8"
+$env:UV_LINK_MODE = "copy"
+
+$stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$logDir = Join-Path $repo "projects/dart-event-study/data/toss_logs"
+New-Item -ItemType Directory -Force $logDir | Out-Null
+$log = Join-Path $logDir "crawl_$stamp.log"
+
+"=== crawl start $(Get-Date) ===" | Out-File -Encoding utf8 $log
+uv run --project projects/dart-event-study python -m dart_event_study.toss.crawl *>&1 |
+    Tee-Object -FilePath $log -Append
+$code = $LASTEXITCODE
+"=== exit $code $(Get-Date) ===" | Out-File -Encoding utf8 -Append $log
+
+if ($code -ne 0) {
+    $alert = Join-Path $logDir "LAST_FAILURE.txt"
+    "Toss crawl FAILED $(Get-Date) -- log: $log" | Out-File -Encoding utf8 $alert
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $n = New-Object System.Windows.Forms.NotifyIcon
+        $n.Icon = [System.Drawing.SystemIcons]::Warning
+        $n.Visible = $true
+        $n.ShowBalloonTip(10000, "Toss crawl FAILED", "exit $code. Check log.", "Warning")
+        Start-Sleep -Seconds 11; $n.Dispose()
+    } catch {}
+    exit $code
+}

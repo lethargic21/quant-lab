@@ -1,0 +1,77 @@
+# 토스 커뮤니티 순방향 수집 — 설계와 제약 준수
+
+> 브랜치: `feat/nlp-signal`. 팍스넷 파이프라인과 별도 모듈(`src/dart_event_study/toss/`).
+> 시작일: 2026-07-15. **과거 백필 불가 → 오늘부터 순방향으로만 쌓는다.**
+
+## 왜 first-seen인가 (핵심 설계)
+
+토스는 게시글에 **절대 시각을 주지 않는다.** 상대 시각("3시간 전")만 렌더하며 과거로 갈수록
+"3일 전"·"1주 전"으로 뭉개져 장중/장후(15:30 경계) 분리가 불가능하다. 절대 시각은 WebSocket
+경로에만 있을 수 있으나 그 관찰은 제약상 금지(WS 프레임 가로채기·프라이빗 API).
+
+→ 그래서 **시각을 읽지 않고 우리가 찍는다.** 글이 처음 목록에 관측된 크롤 시각을
+`first_seen_at`으로 기록해 사실상의 타임스탬프로 쓴다.
+
+```
+crawl_1(12:00) 목록에 없던 글이 crawl_2(15:30) 목록에 나타남
+→ 그 글은 12:00~15:30 사이에 작성됨 → 장중
+```
+
+크롤을 장 경계에 맞추면 분리가 정확해진다:
+
+| 크롤 슬롯 | 관측 창 | 귀속 |
+|---|---|---|
+| 09:00 | 전일 21:00 → 09:00 (야간) | 전일 **장후** |
+| 12:00 | 09:00 → 12:00 | 당일 **장중** |
+| 15:30 | 12:00 → 15:30 | 당일 **장중** |
+| 21:00 | 15:30 → 21:00 | 당일 **장후** |
+
+**주말·공휴일에도 계속 돌린다** — 연휴로 장후 창이 길어지는 것도 데이터다.
+first_seen의 해상도는 크롤 간격(최대 반나절)이지만, 15:30 경계 판별에는 충분하다.
+
+## 모듈 구성
+
+| 파일 | 역할 |
+|---|---|
+| `toss/board.py` | Playwright+실제 Chromium으로 커뮤니티 열기 → **최신순 강제·단조성 검증** → 스크롤 파싱 |
+| `toss/store.py` | 스냅샷 저장 + 누적 테이블(first_seen/last_seen/is_deleted) 갱신 |
+| `toss/crawl.py` | 1회 크롤 CLI (스케줄러가 호출). 직전 관측 id 도달 시 조기 종료 |
+| `toss/aggregate.py` | 일별 파생지표(장중/장후/삭제/좋아요·댓글) |
+| `scripts/toss_crawl_run.ps1` | 크롤 실행 래퍼 + **실패 알림**(마커 파일 + 윈도우 토스트) |
+| `scripts/toss_schedule_install.ps1` | Task Scheduler 등록(4슬롯+부팅, 재부팅 생존) |
+
+## 저장 스키마
+
+- **스냅샷**: `data/raw/toss/{code}/{crawl_ts}.parquet` — 매 크롤 관측 전체.
+- **누적**: `data/raw/toss/{code}/_cumulative.parquet`
+  `post_id, ticker, first_seen_at, last_seen_at, title, likes, comments,
+   relative_time_label, author_hash, is_deleted, deleted_detected_at`
+  - `first_seen_at` = 사실상의 타임스탬프.
+  - `is_deleted` = 직전 크롤엔 있었는데 이번 관측창에서 사라진 글 → **삭제 신호**
+    (스팸은 나중에 지워지는 경우가 많다. **삭제율 자체가 스팸 지표** — 팍스넷에선 불가능했던 것).
+  - `likes/comments` = 크롤마다 갱신(시계열은 스냅샷들에 보존).
+- **일별**: `data/processed/toss_daily.parquet`
+  `ticker, date, posts_intraday, posts_afterhours, posts_total, deleted_count, avg_likes, avg_comments`
+
+## 최신순 게이트 (설계 전제)
+
+인기순으로 수집하면 신규 글을 놓쳐 first-seen이 무너진다. 그래서 크롤마다 **최신순으로 전환하고
+상대시각 단조 증가로 검증**한다(방금→N분→N시간 순). 검증 실패 시 그 종목 크롤은
+**실패 처리**(수집 안 함) — 잘못된 순서로 쌓지 않는다. 실측으로 최신순 전환·작동 확인됨(2026-07-15).
+
+## 스케줄러 · 운영 리스크
+
+- Windows Task Scheduler: 09:00/12:00/15:30/21:00 매일 + 부팅 시 1회(놓친 슬롯 보정),
+  `StartWhenAvailable`로 절전 복귀 시 곧 실행. 등록: `scripts/toss_schedule_install.ps1`.
+- **실패 알림이 최대 운영 리스크 대응**: 조용히 죽으면 며칠치를 날린다. 래퍼가 exit!=0 시
+  `LAST_FAILURE.txt` 마커 + 윈도우 토스트를 남긴다. 로그는 `data/toss_logs/crawl_*.log`.
+
+## 제약 준수 기록
+
+- **실제 Chromium**(Playwright, UA 무변조). 토스는 크롬 지원 → 정식 이용. "미지원 브라우저"
+  경고 없음 확인. 감지되면 우회 없이 중단.
+- **렌더된 DOM만 읽음**. WS 프레임 가로채기·JS 번들 리버스·프라이빗/서명 API 호출 **없음**.
+- robots.txt 준수(`*` Allow, `/_ul/`만 금지 — 커뮤니티 경로 허용). 차단·CAPTCHA 시 중단.
+- **로그인 없음**. 작성자 닉네임·ID **원문 미저장** — salted hash(`author_hash`, 16자)만.
+  salt는 `data/raw/toss/.salt`(gitignore, 커밋 안 함). 도배(동일인 반복) 탐지용.
+- 원문 텍스트는 `data/raw/`(gitignore) 밖으로 나가지 않음. 종목 간 2.5초 간격.
