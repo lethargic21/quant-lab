@@ -98,15 +98,25 @@ def _switch_to_latest(page) -> bool:
                 page.wait_for_timeout(3000)
         except Exception:
             page.wait_for_timeout(1000)
-        # 검증: 최신순이면 상위 글들의 상대시각이 단조 증가
-        labels = page.evaluate(
+        # 검증: 두 독립 증거 중 하나 (저활성 종목 대응)
+        rows = page.evaluate(
             """() => [...document.querySelectorAll('div[data-post-anchor-id]')].map(d => {
                  const t=d.innerText.split('\\n').map(s=>s.trim()).filter(Boolean);
-                 return t.find(s=>/^(방금|\\d+(초|분|시간|일|주|개월|년))$/.test(s))||null; })"""
+                 return {id: d.getAttribute('data-post-anchor-id'),
+                         rel: t.find(s=>/^(방금|\\d+(초|분|시간|일|주|개월|년))$/.test(s))||null}; })"""
         )
-        mins = [rel_to_minutes(x) for x in labels if x is not None]
+        if not rows:
+            continue  # 피드 미로드 — 재시도
+        # (a) 상대시각 단조 증가 (표본 4+)
+        mins = [rel_to_minutes(r["rel"]) for r in rows if r["rel"] is not None]
         if len(mins) >= 4 and all(mins[i] <= mins[i + 1] + 2 for i in range(len(mins) - 1)):
             return True
+        # (b) post_id 내림차순 (id는 시간순 발급 — 높을수록 최신). 저활성 종목 폴백.
+        ids = [int(r["id"]) for r in rows if str(r["id"]).isdigit()]
+        if len(ids) >= 3:
+            desc = sum(ids[i] >= ids[i + 1] for i in range(len(ids) - 1)) / (len(ids) - 1)
+            if desc >= 0.85:  # 고정글 소수 예외 허용
+                return True
     return False
 
 
@@ -123,12 +133,21 @@ def crawl_community(
         page = browser.new_page(viewport={"width": 1400, "height": 2200})
         try:
             page.goto(COMMUNITY_URL.format(code=code), timeout=45000)
-            page.wait_for_timeout(7000)
+            page.wait_for_timeout(9000)
             body = page.inner_text("body")
             if "지원하지 않는 브라우저" in body:
                 raise RuntimeError(f"{code}: 미지원 브라우저 경고 — 중단(우회 금지)")
+            # 빈 커뮤니티(글 0개)는 정상 — 정렬 검증 대상이 없으므로 실패가 아니라 빈 결과.
+            # (검증 실패로 처리하면 비활성 종목이 매 크롤 거짓 알림을 낸다)
+            n_posts = len(page.query_selector_all("div[data-post-anchor-id]"))
+            if n_posts == 0:
+                page.wait_for_timeout(3000)  # 느린 렌더 한 번 더 기회
+                n_posts = len(page.query_selector_all("div[data-post-anchor-id]"))
+            if n_posts == 0:
+                return []  # 빈 커뮤니티
+            # 글이 있으면 반드시 최신순 검증 — 인기순으로 오수집하면 first-seen이 무너진다.
             if not _switch_to_latest(page):
-                raise RuntimeError(f"{code}: 최신순 정렬 검증 실패 — 설계상 수집 중단")
+                raise RuntimeError(f"{code}: 최신순 정렬 검증 실패(글 {n_posts}개) — 설계상 수집 중단")
 
             seen: dict[str, dict] = {}
             hit_stop = False
