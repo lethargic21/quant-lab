@@ -8,6 +8,14 @@ $repo = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Pare
 Set-Location $repo
 $env:PYTHONIOENCODING = "utf-8"
 $env:UV_LINK_MODE = "copy"
+# Playwright browsers live in a fixed ASCII path OUTSIDE %LOCALAPPDATA%.
+# The Task Scheduler execution context cannot read C:\Users\<u>\AppData\Local\ms-playwright
+# (verified: pathlib.exists()==False there while True in an interactive shell -- likely
+# Defender Controlled Folder Access / profile-context restriction), so scheduled runs
+# failed with "Executable doesn't exist". This path is readable in the scheduled context.
+# Browsers were seeded here by copying ms-playwright; update via:
+#   $env:PLAYWRIGHT_BROWSERS_PATH="C:\pw-browsers"; uv run --project projects/dart-event-study python -m playwright install chromium
+$env:PLAYWRIGHT_BROWSERS_PATH = "C:\pw-browsers"
 
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $logDir = Join-Path $repo "projects/dart-event-study/data/toss_logs"

@@ -91,6 +91,13 @@ crawl_1에 없던 글이 crawl_2에 나타나면 그 사이에 작성된 것이 
 
 - Windows Task Scheduler: 09:00/12:00/15:30/21:00 매일 + 부팅 시 1회(놓친 슬롯 보정),
   `StartWhenAvailable`로 절전 복귀 시 곧 실행. 등록: `scripts/toss_schedule_install.ps1`.
+- **Playwright 브라우저 경로**(운영 블로커였음): Task Scheduler 실행 컨텍스트는
+  `%LOCALAPPDATA%\ms-playwright`를 **읽지 못한다**(실측: 스케줄 프로세스에선 `chrome.exe`가
+  `pathlib.exists()==False`, 대화형 셸에선 True — Defender 제어 폴더 접근/프로파일 컨텍스트 제약
+  추정). 그래서 스케줄 슬롯이 전 종목 `Executable doesn't exist`로 실패했다. → 브라우저를
+  **ASCII 고정 경로 `C:\pw-browsers`** 로 옮기고 래퍼가 `PLAYWRIGHT_BROWSERS_PATH`로 지정한다
+  (스케줄 컨텍스트에서 읽힘 검증 완료). 브라우저 업데이트는 반드시 그 경로로:
+  `$env:PLAYWRIGHT_BROWSERS_PATH="C:\pw-browsers"; uv run --project projects/dart-event-study python -m playwright install chromium`.
 - **배터리·절전 대응**(운영 블로커였음): 기본 설정은 배터리 중 작업을 아예 시작하지 않아
   슬롯이 통째로 스킵된다. 그래서 `AllowStartIfOnBatteries`(배터리 시작 허용) +
   `DontStopIfGoingOnBatteries`(배터리 전환돼도 중단 안 함) + `WakeToRun`(절전에서 슬롯 시각에
