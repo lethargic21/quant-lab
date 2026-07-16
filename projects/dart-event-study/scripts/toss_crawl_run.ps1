@@ -3,7 +3,8 @@
 # PowerShell codepage/encoding breakage. On failure (exit!=0) it raises an alert
 # (marker file + Windows balloon) -- silent death is the biggest operational risk.
 $ErrorActionPreference = "Stop"
-$repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent  # .../quant-lab
+# scripts -> dart-event-study -> projects -> quant-lab (three levels up)
+$repo = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
 Set-Location $repo
 $env:PYTHONIOENCODING = "utf-8"
 $env:UV_LINK_MODE = "copy"

@@ -8,12 +8,22 @@ from __future__ import annotations
 
 import hashlib
 import re
-import time
 from dataclasses import dataclass
 
 from playwright.sync_api import sync_playwright
 
 COMMUNITY_URL = "https://www.tossinvest.com/stocks/A{code}/community"
+
+
+class SortValidationError(RuntimeError):
+    """최신순 정렬 검증 실패 — 그 종목·그 슬롯은 결측 처리(오염 쌓느니 건너뜀).
+
+    n_posts(초기 렌더 글 수)를 실어 호출측이 결측 로그(sort_failures.csv)에 남긴다.
+    """
+
+    def __init__(self, code: str, n_posts: int):
+        self.code, self.n_posts = code, n_posts
+        super().__init__(f"{code}: 최신순 정렬 검증 실패(글 {n_posts}개) — 설계상 수집 중단")
 _REL = re.compile(r"^(방금|\d+(?:초|분|시간|일|주|개월|년))$")
 _UNIT_MIN = {"초": 1 / 60, "분": 1, "시간": 60, "일": 1440, "주": 10080, "개월": 43200, "년": 525600}
 
@@ -78,54 +88,72 @@ def _hash_author(nick: str | None, salt: str) -> str | None:
     return hashlib.sha256((salt + nick).encode("utf-8")).hexdigest()[:16]
 
 
+def _is_latest_sorted(page) -> bool:
+    """현재 렌더된 게시글이 최신순인지 두 독립 증거 중 하나로 검증(저활성 종목 대응)."""
+    rows = page.evaluate(
+        """() => [...document.querySelectorAll('div[data-post-anchor-id]')].map(d => {
+             const t=d.innerText.split('\\n').map(s=>s.trim()).filter(Boolean);
+             return {id: d.getAttribute('data-post-anchor-id'),
+                     rel: t.find(s=>/^(방금|\\d+(초|분|시간|일|주|개월|년))$/.test(s))||null}; })"""
+    )
+    if not rows:
+        return False
+    # (a) 상대시각 단조 증가 (표본 4+)
+    mins = [rel_to_minutes(r["rel"]) for r in rows if r["rel"] is not None]
+    if len(mins) >= 4 and all(mins[i] <= mins[i + 1] + 2 for i in range(len(mins) - 1)):
+        return True
+    # (b) post_id 내림차순 (id는 시간순 발급 — 높을수록 최신). 저활성 종목 폴백.
+    ids = [int(r["id"]) for r in rows if str(r["id"]).isdigit()]
+    if len(ids) >= 3:
+        desc = sum(ids[i] >= ids[i + 1] for i in range(len(ids) - 1)) / (len(ids) - 1)
+        if desc >= 0.85:  # 고정글 소수 예외 허용
+            return True
+    return False
+
+
+def _sort_label(page) -> str | None:
+    """정렬 컨트롤 버튼의 현재 라벨('인기순'|'최신순'). 없으면 None."""
+    return page.evaluate(
+        """() => { const b=[...document.querySelectorAll('button')]
+             .find(b=>/^(인기순|최신순)$/.test(b.innerText.trim()));
+           return b ? b.innerText.trim() : null; }"""
+    )
+
+
 def _switch_to_latest(page) -> bool:
-    """정렬을 최신순으로 전환하고 상대시각 단조성으로 검증. 최대 3회 시도."""
-    for _ in range(3):
+    """정렬을 최신순으로 전환. 최대 4회 시도.
+
+    토스 정렬 컨트롤은 클릭 시 인기순<->최신순으로 **토글**한다(실측). 예전 구현은 인기순을
+    클릭해 드롭다운을 연 뒤 '최신순' 항목 좌표를 클릭하려 했으나, 항목 탐지 필터
+    (childElementCount===0)가 실제 요소(childCount=1)와 안 맞아 **한 번도 실행되지 않았다**.
+    게다가 그 항목 클릭이 실행됐다면 정렬을 도로 인기순으로 되돌렸을 것이다.
+    → 드롭다운 항목 클릭을 제거하고, 현재 라벨을 보고 '인기순'일 때만 토글한다.
+    검증은 항상 실제 렌더된 게시글 순서(_is_latest_sorted)로 한다.
+    """
+    for _ in range(4):
+        if _is_latest_sorted(page):
+            return True
         try:
-            page.locator("button:has-text('인기순')").first.click(timeout=5000)
-            page.wait_for_timeout(1200)
-            # 드롭다운의 '최신순' 항목 좌표 클릭 (포털 렌더 대응)
-            cand = page.evaluate(
-                """() => { const out=[];
-                   for (const e of document.querySelectorAll('*')) {
-                     if (e.childElementCount===0 && e.textContent.trim()==='최신순') {
-                       const r=e.getBoundingClientRect();
-                       if (r.width>0&&r.height>0) out.push([Math.round(r.x+r.width/2), Math.round(r.y+r.height/2)]); } }
-                   return out; }"""
-            )
-            if cand:
-                page.mouse.click(cand[-1][0], cand[-1][1])
-                page.wait_for_timeout(3000)
+            if _sort_label(page) == "인기순":
+                page.locator("button:has-text('인기순')").first.click(timeout=5000)
+                page.wait_for_timeout(2500)  # 토글 후 재정렬 렌더 대기
+            else:
+                page.wait_for_timeout(1200)  # 최신순인데 미검증 → 피드 재렌더 대기
         except Exception:
             page.wait_for_timeout(1000)
-        # 검증: 두 독립 증거 중 하나 (저활성 종목 대응)
-        rows = page.evaluate(
-            """() => [...document.querySelectorAll('div[data-post-anchor-id]')].map(d => {
-                 const t=d.innerText.split('\\n').map(s=>s.trim()).filter(Boolean);
-                 return {id: d.getAttribute('data-post-anchor-id'),
-                         rel: t.find(s=>/^(방금|\\d+(초|분|시간|일|주|개월|년))$/.test(s))||null}; })"""
-        )
-        if not rows:
-            continue  # 피드 미로드 — 재시도
-        # (a) 상대시각 단조 증가 (표본 4+)
-        mins = [rel_to_minutes(r["rel"]) for r in rows if r["rel"] is not None]
-        if len(mins) >= 4 and all(mins[i] <= mins[i + 1] + 2 for i in range(len(mins) - 1)):
-            return True
-        # (b) post_id 내림차순 (id는 시간순 발급 — 높을수록 최신). 저활성 종목 폴백.
-        ids = [int(r["id"]) for r in rows if str(r["id"]).isdigit()]
-        if len(ids) >= 3:
-            desc = sum(ids[i] >= ids[i + 1] for i in range(len(ids) - 1)) / (len(ids) - 1)
-            if desc >= 0.85:  # 고정글 소수 예외 허용
-                return True
-    return False
+    return _is_latest_sorted(page)
 
 
 def crawl_community(
     code: str, salt: str, stop_ids: set[str] | None = None, max_scrolls: int = 40, headless: bool = True
-) -> list[Post]:
+) -> tuple[list[Post], bool]:
     """한 종목 커뮤니티를 최신순으로 크롤. stop_ids(직전 크롤 관측분)에 닿으면 조기 종료.
 
-    최신순 검증 실패 시 RuntimeError — 호출측이 그 종목 크롤을 실패로 기록한다.
+    반환: (posts, hit_stop). hit_stop=True면 이번 크롤이 직전 크롤 글까지 다시 관측했다는
+    뜻(= 관측 윈도우가 이전 피드까지 닿음). 삭제 판정은 hit_stop일 때만 신뢰할 수 있다
+    (윈도우가 이전 글에 닿지 못하면 사라짐이 삭제인지 스크롤 미도달인지 구분 불가).
+
+    최신순 검증 실패 시 SortValidationError — 호출측이 그 종목 크롤을 결측으로 기록한다.
     """
     stop_ids = stop_ids or set()
     with sync_playwright() as p:
@@ -144,10 +172,10 @@ def crawl_community(
                 page.wait_for_timeout(3000)  # 느린 렌더 한 번 더 기회
                 n_posts = len(page.query_selector_all("div[data-post-anchor-id]"))
             if n_posts == 0:
-                return []  # 빈 커뮤니티
+                return [], False  # 빈 커뮤니티
             # 글이 있으면 반드시 최신순 검증 — 인기순으로 오수집하면 first-seen이 무너진다.
             if not _switch_to_latest(page):
-                raise RuntimeError(f"{code}: 최신순 정렬 검증 실패(글 {n_posts}개) — 설계상 수집 중단")
+                raise SortValidationError(code, n_posts)
 
             seen: dict[str, dict] = {}
             hit_stop = False
@@ -163,7 +191,7 @@ def crawl_community(
         finally:
             browser.close()
 
-    return [
+    posts = [
         Post(
             post_id=it["id"], ticker=code, title=it["body"][:500],
             likes=int(it.get("likes") or 0), comments=int(it.get("comments") or 0),
@@ -171,3 +199,4 @@ def crawl_community(
         )
         for it in seen.values()
     ]
+    return posts, hit_stop

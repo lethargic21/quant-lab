@@ -39,8 +39,16 @@ def save_snapshot(raw_dir: Path, code: str, posts: list[Post], crawl_ts: dt.date
     return path
 
 
-def update_cumulative(raw_dir: Path, code: str, posts: list[Post], crawl_ts: dt.datetime) -> dict:
-    """누적 테이블 갱신. 반환: 이번 크롤 요약(신규/삭제/총 관측 수)."""
+def update_cumulative(
+    raw_dir: Path, code: str, posts: list[Post], crawl_ts: dt.datetime, hit_stop: bool = False
+) -> dict:
+    """누적 테이블 갱신. 반환: 이번 크롤 요약(신규/삭제/총 관측 수).
+
+    hit_stop: 이번 크롤이 직전 크롤 글까지 다시 관측했는지. **삭제 판정은 hit_stop일 때만**
+    한다 — 윈도우가 이전 피드에 못 닿으면(신규 글이 많아 스크롤 상한에 걸린 경우 등) 사라짐이
+    삭제인지 미도달인지 구분할 수 없기 때문. (토스 post_id는 전역 시간순이 아니라, 관측 최소 id를
+    경계로 쓰면 22시간 공백 같은 성긴 크롤에서 대량 오탐이 난다 — 실측 확인.)
+    """
     path = _cum_path(raw_dir, code)
     now = crawl_ts.isoformat()
     cur = {p.post_id: p for p in posts}
@@ -70,12 +78,24 @@ def update_cumulative(raw_dir: Path, code: str, posts: list[Post], crawl_ts: dt.
                 likes=p.likes, comments=p.comments, relative_time_label=p.relative_time_label,
                 author_hash=p.author_hash, is_deleted=False, deleted_detected_at=None,
             )
-    # 삭제 판정: 직전까지 살아있던 글이 이번 관측창(같은 종목)에서 사라짐
-    # 단, stop_ids 도달 전까지만 봤으므로 '이전에 관측됐고 아직 살아있던' 글만 대상
-    for pid in prev_ids - cur_ids:
-        r = rows[pid]
-        if not r.get("is_deleted"):
-            r["is_deleted"], r["deleted_detected_at"] = True, now
+    # 삭제 판정: **hit_stop일 때만** (윈도우가 이전 피드까지 닿았을 때만 신뢰).
+    # hit_stop=False면 관측 윈도우가 이전 글에 못 닿은 것 → 사라짐을 삭제로 볼 근거가 없다.
+    # hit_stop=True면 이번 크롤이 실제 스캔한 id 범위(관측 최소 id 이상) 안에서 사라진 글만
+    # 삭제로 본다. 순방향 dense 크롤(3h 간격, 신규 소량)에선 윈도우가 이전 창을 촘촘히 덮어
+    # 정확하다. 성긴 크롤(예: 22h 공백)의 크로스-크롤 삭제는 신뢰 못 하므로 별도 태스크로 분리
+    # (정확한 삭제 탐지기는 순방향 데이터 축적 후: [[toss-deletion-detector]]).
+    newly_deleted = 0
+    if hit_stop:
+        obs_ids_num = [int(pid) for pid in cur_ids if str(pid).isdigit()]
+        scan_floor = min(obs_ids_num) if obs_ids_num else None
+        if scan_floor is not None:
+            for pid in prev_ids - cur_ids:
+                if not str(pid).isdigit() or int(pid) < scan_floor:
+                    continue  # 스캔 범위 밖(더 과거) → 관측 안 함, 삭제 아님
+                r = rows[pid]
+                if not r.get("is_deleted"):
+                    r["is_deleted"], r["deleted_detected_at"] = True, now
+                    newly_deleted += 1
 
     out = pd.DataFrame.from_dict(rows, orient="index").rename_axis("post_id").reset_index()
     for c in CUM_COLS:
@@ -86,6 +106,6 @@ def update_cumulative(raw_dir: Path, code: str, posts: list[Post], crawl_ts: dt.
     return {
         "observed": len(cur_ids),
         "new": len(new_ids),
-        "deleted_this_crawl": len(prev_ids - cur_ids),
+        "deleted_this_crawl": newly_deleted,
         "cumulative_total": len(out),
     }

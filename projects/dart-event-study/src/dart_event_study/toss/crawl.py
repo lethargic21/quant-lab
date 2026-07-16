@@ -9,20 +9,36 @@
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
 import sys
 import time
-from pathlib import Path
 
 import pandas as pd
 import yaml
 
 from dart_event_study.config import CONFIG_DIR, DATA_DIR
-from dart_event_study.toss.board import crawl_community
+from dart_event_study.toss.board import SortValidationError, crawl_community
 from dart_event_study.toss.store import save_snapshot, update_cumulative
 
 RAW_DIR = DATA_DIR / "raw" / "toss"
 SALT_PATH = RAW_DIR / ".salt"  # gitignore — 작성자 해시용, 커밋 안 함
+LOG_DIR = DATA_DIR / "toss_logs"
+SORT_FAIL_CSV = LOG_DIR / "sort_failures.csv"  # 정렬 실패로 건너뛴 결측 기록
+
+
+def log_sort_failure(crawl_ts: dt.datetime, code: str, name: str, n_posts: int) -> None:
+    """정렬 실패로 건너뛴 (시각, 종목, 초기 렌더 글 수)를 구조화 기록.
+
+    정렬 실패는 save_snapshot 전에 발생해 스냅샷이 없으므로, 최소한 여기에 결측을 남긴다.
+    """
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    is_new = not SORT_FAIL_CSV.exists()
+    with SORT_FAIL_CSV.open("a", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        if is_new:
+            w.writerow(["crawl_ts", "ticker", "name", "initial_render_posts"])
+        w.writerow([crawl_ts.isoformat(), code, name, n_posts])
 
 
 def load_universe() -> dict[str, str]:
@@ -56,11 +72,16 @@ def main() -> None:
     failures = []
     for i, (code, name) in enumerate(universe.items()):
         try:
-            posts = crawl_community(code, salt=salt, stop_ids=prev_ids(code))
+            posts, hit_stop = crawl_community(code, salt=salt, stop_ids=prev_ids(code))
             save_snapshot(RAW_DIR, code, posts, crawl_ts)
-            summ = update_cumulative(RAW_DIR, code, posts, crawl_ts)
+            summ = update_cumulative(RAW_DIR, code, posts, crawl_ts, hit_stop=hit_stop)
             print(f"  {code} {name}: 관측 {summ['observed']}, 신규 {summ['new']}, "
                   f"삭제 {summ['deleted_this_crawl']}, 누적 {summ['cumulative_total']}")
+        except SortValidationError as e:
+            # 게이트 발동: 오염 쌓느니 그 종목·그 슬롯 결측. 결측을 구조화 기록.
+            log_sort_failure(crawl_ts, code, name, e.n_posts)
+            failures.append((code, name, str(e)[:120]))
+            print(f"  {code} {name}: 실패(정렬·결측기록) — {str(e)[:120]}")
         except Exception as e:  # noqa: BLE001 — 한 종목 실패가 전체를 막지 않게
             failures.append((code, name, str(e)[:120]))
             print(f"  {code} {name}: 실패 — {str(e)[:120]}")
