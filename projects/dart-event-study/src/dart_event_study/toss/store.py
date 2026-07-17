@@ -44,10 +44,9 @@ def update_cumulative(
 ) -> dict:
     """누적 테이블 갱신. 반환: 이번 크롤 요약(신규/삭제/총 관측 수).
 
-    hit_stop: 이번 크롤이 직전 크롤 글까지 다시 관측했는지. **삭제 판정은 hit_stop일 때만**
-    한다 — 윈도우가 이전 피드에 못 닿으면(신규 글이 많아 스크롤 상한에 걸린 경우 등) 사라짐이
-    삭제인지 미도달인지 구분할 수 없기 때문. (토스 post_id는 전역 시간순이 아니라, 관측 최소 id를
-    경계로 쓰면 22시간 공백 같은 성긴 크롤에서 대량 오탐이 난다 — 실측 확인.)
+    hit_stop: 이번 크롤이 직전 크롤 글까지 다시 관측했는지. **현재 삭제 판정은 비활성화**되어
+    이 인자는 사용하지 않는다(미래의 피드-순서 기반 탐지기용 시그니처로만 유지). 아래 삭제
+    블록 주석 참조.
     """
     path = _cum_path(raw_dir, code)
     now = crawl_ts.isoformat()
@@ -78,24 +77,15 @@ def update_cumulative(
                 likes=p.likes, comments=p.comments, relative_time_label=p.relative_time_label,
                 author_hash=p.author_hash, is_deleted=False, deleted_detected_at=None,
             )
-    # 삭제 판정: **hit_stop일 때만** (윈도우가 이전 피드까지 닿았을 때만 신뢰).
-    # hit_stop=False면 관측 윈도우가 이전 글에 못 닿은 것 → 사라짐을 삭제로 볼 근거가 없다.
-    # hit_stop=True면 이번 크롤이 실제 스캔한 id 범위(관측 최소 id 이상) 안에서 사라진 글만
-    # 삭제로 본다. 순방향 dense 크롤(3h 간격, 신규 소량)에선 윈도우가 이전 창을 촘촘히 덮어
-    # 정확하다. 성긴 크롤(예: 22h 공백)의 크로스-크롤 삭제는 신뢰 못 하므로 별도 태스크로 분리
-    # (정확한 삭제 탐지기는 순방향 데이터 축적 후: [[toss-deletion-detector]]).
+    # 삭제 판정: **현재 완전 비활성화(보류)**. is_deleted는 항상 False로 둔다.
+    # hit_stop 게이트 + 관측 최소 id 경계로도 오탐을 못 막는다 — 토스 피드는 post_id가
+    # 시간순이 아니고 매 크롤이 id-공간에서 성기게 관측하므로, 스캔 범위 안에 있으나 이번에
+    # 안 잡힌 글이 대량 삭제로 오판된다(실측: 10h 간격 크롤에서 4,793건 오탐. 예: 000660은
+    # 68글 관측에 736건 삭제 오탐). 정확한 삭제 탐지는 피드 순서(스냅샷 row order) 기반이라야
+    # 하며, 순방향 깨끗한 데이터 축적 후 별도 태스크로 만든다: [[toss-deletion-detector]].
+    # hit_stop 인자는 그 미래 탐지기용 시그니처로 유지하되 지금은 사용하지 않는다.
+    _ = hit_stop
     newly_deleted = 0
-    if hit_stop:
-        obs_ids_num = [int(pid) for pid in cur_ids if str(pid).isdigit()]
-        scan_floor = min(obs_ids_num) if obs_ids_num else None
-        if scan_floor is not None:
-            for pid in prev_ids - cur_ids:
-                if not str(pid).isdigit() or int(pid) < scan_floor:
-                    continue  # 스캔 범위 밖(더 과거) → 관측 안 함, 삭제 아님
-                r = rows[pid]
-                if not r.get("is_deleted"):
-                    r["is_deleted"], r["deleted_detected_at"] = True, now
-                    newly_deleted += 1
 
     out = pd.DataFrame.from_dict(rows, orient="index").rename_axis("post_id").reset_index()
     for c in CUM_COLS:
