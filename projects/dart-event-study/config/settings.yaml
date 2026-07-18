@@ -66,3 +66,9 @@ event_study:
     - [-1, 1]
     - [0, 5]
     - [0, 20]
+
+# CAAR 유의성 배터리 (Phase B — caar_tests.py)
+# BMP·Corrado·부호검정·부트스트랩 CI·placebo. n_perm = placebo 순열 수
+# (경험적 p 해상도 = 1/(n_perm+1); 1000이면 최소 p≈0.001).
+caar_tests:
+  n_perm: 1000
