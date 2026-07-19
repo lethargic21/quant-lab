@@ -49,7 +49,7 @@ class DartClient:
         재시도 시 세션을 새로 만들어 끊긴 keep-alive 커넥션을 버린다.
         """
         last_exc: Exception | None = None
-        for attempt, backoff in enumerate((0, 3, 10)):
+        for backoff in (0, 3, 10):
             if backoff:
                 time.sleep(backoff)
                 self._session = requests.Session()

@@ -2,8 +2,15 @@
 members = ["shared", "projects/*"]
 
 [tool.ruff]
-line-length = 100
+# ruff의 E501은 문자 수가 아니라 **표시 폭**으로 재고, 한글(East Asian Wide)은 폭 2로 센다.
+# 즉 100은 이 레포(한국어 주석·print 다수)에선 사실상 "한글 50자" — 과도하게 빡빡해
+# 산문이 부자연스럽게 끊긴다. 120으로 두되 규칙 자체는 유지한다(정말 긴 줄은 계속 걸림).
+line-length = 120
 target-version = "py311"
+# 노트북은 "실행된 리포트 산출물"이라 린트 대상에서 제외한다 — 플롯 코드의 긴 줄이
+# 대부분이고, 린트를 맞추려 셀을 고치면 커밋된 실행 결과(출력)와 어긋난다.
+# 라이브러리/스크립트 코드(src·tests·shared)는 전부 린트 대상.
+extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "B", "UP"]

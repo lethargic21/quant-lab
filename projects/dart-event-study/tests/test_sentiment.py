@@ -9,11 +9,15 @@ from dart_event_study.sentiment.news import _parse_articles
 # 실측 마크업 구조 축약 픽스처 (해시 클래스는 구조 앵커가 아니므로 생략)
 FIXTURE = """
 <div>
-  <a href="https://n.news.naver.com/mnews/article/018/0004618571"><span>1兆 자사주 사들이는 포스코…주가 하방 지지</span></a>
-  <a href="https://n.news.naver.com/mnews/article/018/0004618571"><span>포스코가 대규모 자사주 매입에 나선 것은 2007년 이후 13년여 만이다</span></a>
-  <a href="https://www.edaily.co.kr/news/read?newsId=123"><span>키움證 "포스코 1조 자사주 매입 주주가치 제고 긍정적"</span></a>
+  <a href="https://n.news.naver.com/mnews/article/018/0004618571">
+    <span>1兆 자사주 사들이는 포스코…주가 하방 지지</span></a>
+  <a href="https://n.news.naver.com/mnews/article/018/0004618571">
+    <span>포스코가 대규모 자사주 매입에 나선 것은 2007년 이후 13년여 만이다</span></a>
+  <a href="https://www.edaily.co.kr/news/read?newsId=123">
+    <span>키움證 "포스코 1조 자사주 매입 주주가치 제고 긍정적"</span></a>
   <a href="https://search.naver.com/search.naver?page=2"><span>다음 페이지로 이동하는 링크입니다</span></a>
-  <a href="https://news.example.com/promo"><span>언론사가 선정한 주요기사 혹은 심층기획 기사입니다. 구독하세요.</span></a>
+  <a href="https://news.example.com/promo">
+    <span>언론사가 선정한 주요기사 혹은 심층기획 기사입니다. 구독하세요.</span></a>
   <a href="https://news.example.com/short"><span>짧은글</span></a>
 </div>
 """

@@ -48,7 +48,9 @@ def parse_list_page(html: str) -> list[dict]:
         if not posted:
             continue
 
-        def _num(sel: str) -> int:
+        # li를 기본인자로 바인딩 — 현재 루프 안에서만 호출하므로 동작은 같지만,
+        # 나중에 이 함수가 루프 밖으로 새도 늦은 바인딩 함정에 걸리지 않는다.
+        def _num(sel: str, li=li) -> int:
             el = li.select_one(sel)
             digits = re.sub(r"\D", "", el.get_text()) if el else ""
             return int(digits) if digits else 0

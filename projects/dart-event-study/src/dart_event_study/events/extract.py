@@ -11,7 +11,13 @@ from __future__ import annotations
 import pandas as pd
 
 from dart_event_study.collect import year_slices
-from dart_event_study.config import DATA_DIR, get_api_key, load_settings, load_universe, resolve_tickers
+from dart_event_study.config import (
+    DATA_DIR,
+    get_api_key,
+    load_settings,
+    load_universe,
+    resolve_tickers,
+)
 from dart_event_study.dart.client import DartClient
 from dart_event_study.events.buyback import extract_buybacks, extract_trust_buybacks
 from dart_event_study.events.earnings import extract_earnings

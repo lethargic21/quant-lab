@@ -9,7 +9,8 @@ from dart_event_study.board.spam_rules import SpamRuleParams, add_rule_flags, no
 # 정찰 실측 마크업 축약 (작성자 div.write 포함 — 파서가 읽지 않아야 함)
 FIXTURE = """
 <li><div class="type type_" data-seq="111">148329</div>
-<div class="title"><p class="tit"><a class="best-title" href="javascript:bbsWrtView(111);">● 속보) 삼성전자 매수 적기</a>
+<div class="title"><p class="tit">
+<a class="best-title" href="javascript:bbsWrtView(111);">● 속보) 삼성전자 매수 적기</a>
 <a href="#"><b class="comment-num" id="comment-num_111">2</b></a></p></div>
 <div class="write"><a href="javascript:viewProfile('secret_user')">닉네임노출</a></div>
 <div class="viewer" id="hitsNum_111"><span>조회 </span>7</div>

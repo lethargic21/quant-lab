@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import pandas as pd
 
@@ -53,7 +53,11 @@ class SpamRuleParams:
     enabled: bool = True        # 필터 전체 on/off (5단계)
 
 
-def add_rule_flags(df: pd.DataFrame, params: SpamRuleParams = SpamRuleParams()) -> pd.DataFrame:
+# frozen dataclass라 공유 기본값이 안전 (인자 기본값에서 매번 생성하지 않도록 모듈 싱글턴)
+DEFAULT_RULE_PARAMS = SpamRuleParams()
+
+
+def add_rule_flags(df: pd.DataFrame, params: SpamRuleParams = DEFAULT_RULE_PARAMS) -> pd.DataFrame:
     """df(title, posted_at[, ticker]) → 규칙 플래그 컬럼 추가.
 
     spam_rule = 개별 규칙 OR. params.enabled=False면 모든 플래그 False (전/후 비교용).

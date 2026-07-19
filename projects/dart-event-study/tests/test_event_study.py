@@ -63,9 +63,8 @@ def test_summarize_flags_thin_sample():
 
 
 def test_clustered_t_singleton_clusters_matches_naive():
-    from scipy import stats as sps
-
     from dart_event_study.analysis.event_study import clustered_t
+    from scipy import stats as sps
 
     vals = list(rng.normal(0.02, 0.01, 80))
     t_naive, _ = sps.ttest_1samp(vals, 0)
@@ -74,9 +73,8 @@ def test_clustered_t_singleton_clusters_matches_naive():
 
 
 def test_clustered_t_shrinks_with_within_cluster_correlation():
-    from scipy import stats as sps
-
     from dart_event_study.analysis.event_study import clustered_t
+    from scipy import stats as sps
 
     # 10개 클러스터, 클러스터 안 10개 값이 완전 동일 (상관 1) → 유효표본 10
     base = rng.normal(0.02, 0.01, 10)

@@ -25,7 +25,8 @@ def extract_buybacks(
         rcept_no = r["rcept_no"]
         rcept_dt = rcept_no[:8]  # rcept_no 앞 8자리 = 접수일자 (실측 일치 확인)
         plan_shares = num(r.get("aqpln_stk_ostk"))
-        total = total_shares_before(client, corp_code, dt.date.fromisoformat(f"{rcept_dt[:4]}-{rcept_dt[4:6]}-{rcept_dt[6:]}"))
+        rcept_date = dt.date.fromisoformat(f"{rcept_dt[:4]}-{rcept_dt[4:6]}-{rcept_dt[6:]}")
+        total = total_shares_before(client, corp_code, rcept_date)
         strength = plan_shares / total if (plan_shares and total) else None
         events.append(
             {

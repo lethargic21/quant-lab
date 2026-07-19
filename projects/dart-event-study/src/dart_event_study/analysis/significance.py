@@ -83,7 +83,6 @@ def deflated_sharpe(daily: pd.Series, trial_sharpes_ann: list[float]) -> dict:
 
 
 def main() -> None:
-    import yaml
     from quantlab_shared.backtest.costs import KOSPI_TAX_SCHEDULE, CostModel
     from quantlab_shared.backtest.engine import run_backtest
     from quantlab_shared.data.prices import PriceStore
