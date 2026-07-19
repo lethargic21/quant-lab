@@ -9,16 +9,38 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]  # projects/dart-event-study
 REPO_ROOT = PROJECT_ROOT.parents[1]  # quant-lab
-CONFIG_DIR = PROJECT_ROOT / "config"
+CONFIG_DIR = PROJECT_ROOT / "config"  # 기본 설정 디렉터리 (CLI --config-dir로 덮어쓰기 가능)
 DATA_DIR = PROJECT_ROOT / "data"  # gitignore — API 응답/가격 스냅샷 캐시
+
+# CLI(`python -m dart_event_study ... --config-dir/--mode`)가 채우는 전역 오버라이드.
+# 아무도 설정하지 않으면 기존 동작 그대로 — 기존 `python -m <module>` 진입점은 영향 없음.
+_OVERRIDES: dict[str, object | None] = {"config_dir": None, "mode": None}
+
+
+def apply_overrides(config_dir: Path | str | None = None, mode: str | None = None) -> None:
+    """CLI 전역 옵션 적용. 설정 로더가 이후 이 값을 우선한다."""
+    if config_dir is not None:
+        path = Path(config_dir)
+        if not path.is_dir():
+            raise SystemExit(f"--config-dir 경로가 없음: {path}")
+        _OVERRIDES["config_dir"] = path
+    if mode is not None:
+        _OVERRIDES["mode"] = mode
+
+
+def active_config_dir() -> Path:
+    return _OVERRIDES["config_dir"] or CONFIG_DIR  # type: ignore[return-value]
 
 
 def load_settings() -> dict:
-    return yaml.safe_load((CONFIG_DIR / "settings.yaml").read_text(encoding="utf-8"))
+    return yaml.safe_load((active_config_dir() / "settings.yaml").read_text(encoding="utf-8"))
 
 
 def load_universe() -> dict:
-    return yaml.safe_load((CONFIG_DIR / "universe.yaml").read_text(encoding="utf-8"))
+    universe = yaml.safe_load((active_config_dir() / "universe.yaml").read_text(encoding="utf-8"))
+    if _OVERRIDES["mode"]:
+        universe["mode"] = _OVERRIDES["mode"]  # yaml 수정 없이 debug/full 전환
+    return universe
 
 
 def resolve_tickers(universe: dict | None = None) -> list[str]:

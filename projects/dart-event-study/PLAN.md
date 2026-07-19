@@ -369,3 +369,22 @@ Phase 2 시작 시 실제 응답을 찍어 필드 존재를 확인한 뒤 확정
 
 **결론**: "드리프트가 어텐션에 따라 증폭/소멸되는가"에 대한 답은 이 표본에서 **아니오(null)**.
 유의하게 만들려 스펙을 바꾸지 않았고, 유일하게 유의했던 항도 사전 규칙으로 기각했다.
+
+---
+
+## 14. 통합 CLI + CI (Phase C — 2026-07-20)
+
+**CI** (`.github/workflows/ci.yml`): push/PR마다 `uv sync --frozen` → `ruff` → `pytest`,
+**Ubuntu·Windows 매트릭스**. 첫 실행 양쪽 green 확인. 선결과제로 미집행 상태였던 ruff 63건 정리
+(line-length 100→120 — ruff E501은 **표시 폭** 기준이고 한글이 폭 2라 100은 사실상 한글 50자.
+근거를 설정에 명시. 노트북은 실행 산출물이라 린트 제외).
+
+**통합 CLI** (`src/dart_event_study/__main__.py`): `python -m dart_event_study <단계>`로
+14개 파이프라인 단계를 한 진입점에 모음(`--list`로 목록).
+- **기존 진입점 불변**이 설계 제약이었다 — 토스 스케줄러가 `python -m dart_event_study.toss.crawl`을
+  직접 호출하므로 깨면 운영이 멈춘다. 통합 CLI는 각 모듈의 `main()`을 지연 import해 호출하는
+  **추가 계층**일 뿐이고, 모듈 직접 실행 경로는 그대로 살아 있다(테스트로 계약 고정).
+- **오버라이드**: `--mode {debug,full}`, `--config-dir DIR`. `config.apply_overrides()`가 전역
+  오버라이드를 채우고 `load_settings`/`load_universe`가 이를 우선한다 — **yaml 파일은 건드리지
+  않는다**(메모리 오버라이드, 테스트로 원본 불변 검증). 모든 단계가 이 두 로더를 거치므로
+  한 곳만 고쳐 전 단계에 전파됐다.
