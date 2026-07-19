@@ -119,6 +119,7 @@ uv run --project projects/dart-event-study python -m dart_event_study.events.ext
 uv run --project projects/dart-event-study python -m dart_event_study.signals.build
 uv run --project projects/dart-event-study python -m dart_event_study.analysis.event_study
 uv run --project projects/dart-event-study python -m dart_event_study.analysis.caar_tests   # BMP·Corrado·부호·placebo
+uv run --project projects/dart-event-study python -m dart_event_study.analysis.interaction  # 이벤트×어텐션 상호작용 회귀
 uv run --project projects/dart-event-study python -m dart_event_study.analysis.backtest
 uv run --project projects/dart-event-study python -m dart_event_study.analysis.significance
 
@@ -164,8 +165,31 @@ uv run --frozen pytest projects/dart-event-study/tests -q
 | 기사 수(attention) 삼분위 | +3.11% | +4.91% | +5.74% | +2.63%p (p=0.13, **비유의**) |
 | 제목 감성(룰) 삼분위 | +3.67% | +5.36% | +4.73% | +1.06%p (p=0.54, 무정보) |
 
+**단면 상호작용 회귀 (Phase A — [analysis/interaction.py](./src/dart_event_study/analysis/interaction.py))**:
+삼분위 sort를 정식 회귀로 승격. `CAR ~ is_trust + attn + is_trust:attn + log시총 + 추정창변동성`,
+월클러스터 SE. 어텐션 = log1p(기사 수) z-score. **어텐션 수집창이 [-1,+1]이라 이건 사전 관심이
+아니라 사후·동시 반응**이므로, 어텐션 창과 겹치는 `CAR[0,+20]`과 겹치지 않는 `CAR[+2,+20]`을
+사전에 둘 다 등록해 전부 리포트한다 (N=273, 통제 포함 시 시총 결측 제외 234):
+
+| 항 | CAR[0,+20] 통제O | CAR[0,+20] 통제X | CAR[+2,+20] 통제O | CAR[+2,+20] 통제X |
+|---|---|---|---|---|
+| `attn` (직접취득 어텐션 효과) | +0.0246 (p=.015) | +0.0139 (p=.19) | +0.0140 (p=.13) | +0.0066 (p=.46) |
+| `attn:is_trust` (**상호작용**) | +0.0017 (p=.93) | −0.0067 (p=.70) | −0.0045 (p=.77) | −0.0059 (p=.67) |
+| `log시총` | −0.0185 (p=.002) | — | −0.0122 (p=.024) | — |
+| R² | 0.066 | 0.010 | 0.030 | 0.002 |
+
+- **상호작용은 완전한 null** — 4개 스펙 전부 p≥0.67이고 부호도 오락가락. 자사주 직접취득과
+  신탁계약 사이에 "어텐션이 드리프트를 증폭/소멸시키는 정도"의 차이는 **증거 없음**.
+- **어텐션 주효과도 예측력으로 보기 어렵다.** 유의한 건 4개 중 **어텐션 창과 겹치는 스펙 하나뿐**
+  (p=.015)이고, 겹치지 않는 [+2,+20]에서는 사라진다(p=.13/.46). 사전에 못박은 판정 규칙대로
+  — **겹칠 때만 유의한 것은 예측이 아니라 동시성**(기사 많은 날 = 많이 움직인 날). R²도 0.002~0.07.
+- **부수 발견(더 견고)**: `log시총` 계수가 음수로 유의 — 작은 회사일수록 자사주 드리프트가 크다.
+  기사 수는 대형주에서 많으므로, 규모를 통제해야 어텐션 계수가 비로소 양수로 드러난다
+  (통제 X에서 attn이 죽는 이유). 즉 삼분위에서 보였던 "관심↑ = 드리프트↑" 단조 패턴의 상당 부분은
+  **규모 교락**이었다.
+
 **결론**: 관심이 많을수록 드리프트가 큰 단조 패턴(모멘텀 방향, 되돌림 가설 기각 방향)이
-보이나 유의 수준엔 못 미침. 감성 톤은 변별력 없음(자사주 뉴스는 원래 호의적, 평균 +0.30).
+보이나 유의 수준엔 못 미침 — 회귀에서도 동일하게 **null**. 감성 톤은 변별력 없음(자사주 뉴스는 원래 호의적, 평균 +0.30).
 데이터: 네이버 뉴스 날짜필터 크롤링(±1일 창, 이벤트당 기사 5~86건, 캐시), 감성 = 공개된
 극성어 사전 룰. 한계: 쿼리 정밀도(관련 없는 기사 혼입), 기사수×규모 ρ=0.19 교락,
 soft-403 대응 스로틀로 수집 ~30분.
