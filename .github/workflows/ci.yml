@@ -1,0 +1,43 @@
+name: CI
+
+# push/PR마다 ruff 린트 + pytest 실행.
+# 테스트는 전부 네트워크 불필요(합성 데이터·픽스처)이고 data/ 캐시에 의존하지 않으므로
+# API 키 없이 CI에서 그대로 돌아간다. 분석 CLI(collect/event_study 등)는 OpenDART 키와
+# 가격 캐시가 필요해 CI 대상이 아니다 — 검증 대상은 라이브러리 로직과 린트.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# 같은 브랜치에 연속 push 시 이전 실행 취소
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test:
+    # 개발은 Windows에서 하고 있으나 OS 의존 버그(예: cp949 stdout 인코딩)를 잡기 위해
+    # 두 OS 모두에서 검증한다. fail-fast=false — 한쪽이 깨져도 다른 쪽 결과를 본다.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"   # requires-python >=3.11
+
+      # uv.lock 고정 설치 — 재현성 (락과 어긋나면 실패시킨다)
+      - name: Sync dependencies (locked)
+        run: uv sync --all-packages --frozen
+
+      - name: Lint (ruff)
+        run: uv run --frozen ruff check projects shared
+
+      - name: Tests (pytest)
+        run: uv run --frozen pytest projects/dart-event-study/tests -q

@@ -130,6 +130,13 @@ uv run --project projects/dart-event-study jupyter nbconvert --to notebook --exe
 full 모드(200종목) 첫 실행은 API ~1.5만 호출 / 30~60분 (OpenDART 일한도 2만).
 개발 시 [config/universe.yaml](./config/universe.yaml)에서 `mode: debug`(5종목)로 전환.
 
+검증(린트·테스트)은 API 키·네트워크 없이 레포 루트에서 바로 돌아간다 — CI와 동일한 명령:
+
+```bash
+uv run --frozen ruff check projects shared
+uv run --frozen pytest projects/dart-event-study/tests -q
+```
+
 ## 한계
 
 - **유니버스 프록시**: 2019-01 시총을 "현재(상폐 시점) 주식수 × 2019-01 수정종가"로 근사 —

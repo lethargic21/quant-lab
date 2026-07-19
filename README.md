@@ -1,5 +1,7 @@
 # quant-lab
 
+[![CI](https://github.com/lethargic21/quant-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/lethargic21/quant-lab/actions/workflows/ci.yml)
+
 퀀트 리서치 프로젝트 모음. 이벤트 기반 시그널, 팩터 모델, 백테스트를
 재현 가능한 형태로 쌓아가는 개인 리서치 랩.
 
@@ -14,7 +16,10 @@
 
 ## Stack
 
-Python 3.11+ · pykrx / FinanceDataReader · OpenDART · uv
+Python 3.11+ · FinanceDataReader · OpenDART · uv (workspace + `uv.lock` 고정)
+
+CI: push/PR마다 `ruff` 린트 + `pytest`를 Ubuntu·Windows 양쪽에서 실행
+([.github/workflows/ci.yml](.github/workflows/ci.yml)). 테스트는 네트워크·API 키 불필요.
 
 ## Roadmap
 
