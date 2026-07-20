@@ -108,8 +108,22 @@ crawl_1에 없던 글이 crawl_2에 나타나면 그 사이에 작성된 것이 
   `AtStartup`은 관리자 실행이 필요하다. `scripts/toss_schedule_install.ps1`을 **관리자 PowerShell**로
   1회 실행하면 5개 트리거(4일일 + AtStartup) + 위 설정이 모두 반영된다. 등록 후
   `Get-ScheduledTask -TaskName QuantLab_TossCrawl`로 검증.
-- **실패 알림이 최대 운영 리스크 대응**: 조용히 죽으면 며칠치를 날린다. 래퍼가 exit!=0 시
-  `LAST_FAILURE.txt` 마커 + 윈도우 토스트를 남긴다. 로그는 `data/toss_logs/crawl_*.log`.
+- **실패 알림이 최대 운영 리스크 대응**: 조용히 죽으면 며칠치를 날린다. 래퍼 exit는 3단이다 —
+  **0 = 전 종목 성공 / 2 = 부분 성공(데이터는 들어옴, 일부 종목 정렬 실패) / 1 = 진짜 실패(수집 0건)**.
+  `LAST_FAILURE.txt` 마커 + 윈도우 토스트는 **exit 1에서만** 낸다. 정렬 실패는 첫 5일에 3번 날 만큼
+  흔해서, 그걸로 경보를 울리면 늑대소년이 된다(→ `sort_failures.csv`와 STATUS.txt에 기록만).
+- **살아있음 판정은 exit 코드가 아니라 "데이터 도착"**: 매 크롤이 `STATUS.txt`를 갱신한다.
+  `LAST_SUCCESS`는 스냅샷이 1건이라도 생성된 회차(exit 0·2)에만 전진하고, exit 1에선 그대로 둬서
+  **staleness가 드러나게** 한다. 파일 하나만 열면 살아있는지 + 어디가 깨졌는지 보인다:
+  ```
+  LAST_SUCCESS 2026-07-21 00:05:04     <- 데이터가 마지막으로 들어온 시각 (워치독은 이 줄만 보면 됨)
+  LAST_CRAWL   2026-07-21 00:05:04     <- 마지막 시도 (성공·실패 무관)
+  RESULT       OK (exit 0)
+  TICKERS      20/20                   <- 스냅샷이 생성된 종목 수 (빈 커뮤니티도 스냅샷을 남김)
+  SORT_FAILED  none                    <- 이번 회차 정렬 실패 종목
+  LOG          ...\crawl_20260720_235806.log
+  ```
+  로그는 `data/toss_logs/crawl_*.log`.
   (래퍼의 `$repo` 경로 계산이 한 단계 부족해 한동안 엉뚱한 경로에 쓰던 버그를 수정 — 3단계 상위.)
 
 ## 제약 준수 기록
