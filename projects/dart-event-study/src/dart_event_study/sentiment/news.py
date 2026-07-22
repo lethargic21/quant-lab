@@ -54,15 +54,22 @@ def fetch_event_news(
     session: requests.Session | None = None,
     max_pages: int = 2,
     throttle: float = 2.5,
+    query_term: str = "자사주",
 ) -> dict:
-    """이벤트 창([-1,+1] 달력일) '회사명 자사주' 기사 수집. 캐시 우선.
+    """이벤트 창([-1,+1] 달력일) '회사명 <query_term>' 기사 수집. 캐시 우선.
+
+    query_term: 이벤트 타입별 검색어 (자사주 / 유상증자 / 실적 …). 쿼리 정밀도를
+    이벤트 성격에 맞춘다 (자사주 뉴스와 유증 뉴스는 다른 키워드로 잡아야 함).
 
     네이버 소프트 차단(403 — 실측: ~55이벤트 후 페이지네이션에서 발생) 대응:
     스로틀 2.5초+지터, 페이지 상한 2(기사 상한 ~20 — 삼분위엔 충분),
     403 시 60초 백오프 + 새 세션으로 2회 재시도.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
-    key = f"{corp_name}_{rcept_date.isoformat()}".replace(" ", "")
+    # 캐시 키에 검색어를 포함 — 같은 회사·날짜라도 검색어가 다르면 다른 결과.
+    # 단 기존 자사주 캐시(284건, 재크롤 비용 큼)를 보존하려 legacy 검색어는 접미사 생략.
+    suffix = "" if query_term == "자사주" else f"_{query_term}"
+    key = f"{corp_name}_{rcept_date.isoformat()}{suffix}".replace(" ", "")
     path = cache_dir / f"{key}.json"
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
@@ -81,7 +88,7 @@ def fetch_event_news(
             r = session.get(
                 "https://search.naver.com/search.naver",
                 params={
-                    "where": "news", "query": f"{corp_name} 자사주", "sm": "tab_opt",
+                    "where": "news", "query": f"{corp_name} {query_term}", "sm": "tab_opt",
                     "sort": "0", "pd": "3", "ds": ds, "de": de, "start": str(page * 10 + 1),
                 },
                 headers={"User-Agent": UA, "Accept-Language": "ko-KR,ko;q=0.9"},

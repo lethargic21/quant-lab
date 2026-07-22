@@ -9,10 +9,11 @@
 
     CAR ~ event_type + attn + event_type:attn + controls
 
-⚠️ **표본 제약 (정직 고지)**: 뉴스 어텐션은 **자사주 이벤트에만** 수집돼 있다
-(실적 5,300 / 유증 139건은 미수집). 따라서 event_type 축은 전 이벤트 타입이 아니라
-**자사주 직접취득(178) vs 신탁계약(106)** 두 종류로만 구성된다. "이벤트 타입별로 어텐션
-효과가 다른가"는 이 두 그룹 범위 안에서만 답할 수 있다.
+⚠️ **표본 제약 (정직 고지)**: 뉴스 어텐션은 **자사주(직접 178 + 신탁 106) + 유상증자(139)**
+에 수집돼 있다. **실적 5,300건은 미수집**(스로틀상 전량 크롤 ~10시간 + 밴 위험으로 제외).
+따라서 event_type 축은 세 종류 — 자사주 직접(기준) / 신탁 / 유증 — 로 구성된다. 유증은
+방향이 반대(희석 악재)라, 호재 이벤트와 악재 이벤트에서 어텐션 효과가 다른지까지 본다.
+"실적에서도 같은가"는 이 표본으로 답할 수 없다.
 
 ⚠️ **어텐션의 시점 (look-ahead / 해석 주의)**: 뉴스 수집 창은 접수일 [-1, +1]이라
 이 어텐션은 **사전 관심이 아니라 이벤트에 대한 사후·동시 반응**이다. 변수명을
@@ -86,7 +87,9 @@ def build_event_panel(
     closes: dict[str, pd.Series], est_len: int, gap: int,
 ) -> pd.DataFrame:
     """이벤트별 회귀 패널: CAR(두 윈도우) + 어텐션 + 통제변수 + 클러스터 키."""
-    meta = events.set_index("rcept_no")[["total_shares"]]
+    # 규모 통제용 주식수: 자사주는 total_shares, 유증은 pre_shares(증자 전 발행총수).
+    # (자사주 이벤트엔 pre_shares가 없고, 유증 이벤트엔 total_shares가 없음 — 서로 보완)
+    meta = events.set_index("rcept_no")[["total_shares", "pre_shares"]]
     rows = []
     for _, ev in news.iterrows():
         tk = ev["ticker"]
@@ -104,7 +107,8 @@ def build_event_panel(
             continue
         pos = day0_pos(panel, day0)
         px = closes[tk].iloc[closes[tk].index.searchsorted(pd.Timestamp(day0))] if pos is not None else np.nan
-        shares = meta["total_shares"].get(ev["rcept_no"], np.nan)
+        ts = meta["total_shares"].get(ev["rcept_no"], np.nan)
+        shares = ts if pd.notna(ts) else meta["pre_shares"].get(ev["rcept_no"], np.nan)
         rows.append({
             "rcept_no": ev["rcept_no"],
             "ticker": tk,
@@ -124,16 +128,29 @@ def build_event_panel(
     # 사후 반응 어텐션: log1p 후 표본 z-score (rolling baseline 부재 — 모듈 docstring 참조)
     la = np.log1p(df["n_articles"])
     df["attn_post"] = (la - la.mean()) / la.std(ddof=1)
-    df["is_trust"] = (df["event_type"] == "buyback_trust").astype(float)
     df["log_mktcap"] = np.log(df["mktcap"])
     return df
 
 
-def run_spec(df: pd.DataFrame, dep: str, with_controls: bool) -> pd.DataFrame:
-    """CAR ~ is_trust + attn_post + is_trust:attn_post [+ log_mktcap + est_vol], 월클러스터 SE."""
-    cols = ["is_trust", "attn_post", "attn_x_trust"]
+BASE_TYPE = "buyback"  # 회귀 기준 범주 (자사주 직접취득) — 나머지는 더미로
+
+
+def run_spec(df: pd.DataFrame, dep: str, with_controls: bool, base_type: str = BASE_TYPE) -> pd.DataFrame:
+    """CAR ~ Σ(event_type 더미) + attn_post + Σ(event_type:attn_post) [+ 통제], 월클러스터 SE.
+
+    event_type 축을 더미로 일반화 (기준=base_type). 각 비기준 타입 t에 대해
+    is_<t>(수준 차이)와 attn_x_<t>(어텐션 기울기 차이=상호작용)를 넣는다.
+    """
     d = df.copy()
-    d["attn_x_trust"] = d["attn_post"] * d["is_trust"]
+    types = [t for t in sorted(d["event_type"].unique()) if t != base_type]
+    dummy_cols, inter_cols = [], []
+    for t in types:
+        dc, ic = f"is_{t}", f"attn_x_{t}"
+        d[dc] = (d["event_type"] == t).astype(float)
+        d[ic] = d["attn_post"] * d[dc]
+        dummy_cols.append(dc)
+        inter_cols.append(ic)
+    cols = [*dummy_cols, "attn_post", *inter_cols]
     if with_controls:
         cols += ["log_mktcap", "est_vol"]
     d = d.dropna(subset=[dep, *cols])
@@ -172,7 +189,13 @@ def main() -> None:
     start, end = settings["period"]["start"], settings["period"]["end"]
     es_cfg = settings["event_study"]
 
-    news = pd.read_parquet(DATA_DIR / "news_buyback.parquet")
+    # 수집된 뉴스 파일 전부 이어붙임 (buyback + rights; 없는 그룹은 건너뜀)
+    news_parts = [
+        pd.read_parquet(DATA_DIR / f)
+        for f in ("news_buyback.parquet", "news_rights.parquet")
+        if (DATA_DIR / f).exists()
+    ]
+    news = pd.concat(news_parts, ignore_index=True)
     events = pd.read_parquet(DATA_DIR / f"events_{mode}.parquet")
     store = PriceStore(DATA_DIR / "prices", start, end)
     mkt = store.ohlcv("KS11")["close"].pct_change().dropna()
@@ -182,9 +205,10 @@ def main() -> None:
     panels = {t: build_panel(closes[t].pct_change().dropna(), mkt) for t in tickers}
 
     df = build_event_panel(news, events, panels, closes, es_cfg["estimation_window"], es_cfg["gap"])
-    print(f"뉴스 어텐션 이벤트 {len(news)}건 → CAR 매칭 {len(df)}건 "
-          f"(직접 {int((df.is_trust == 0).sum())} / 신탁 {int((df.is_trust == 1).sum())})")
-    print(f"통제변수 결측(시총) 제외 시 {int(df['log_mktcap'].notna().sum())}건\n"
+    by_type = df["event_type"].value_counts().to_dict()
+    print(f"뉴스 어텐션 이벤트 {len(news)}건 → CAR 매칭 {len(df)}건  {by_type}")
+    print(f"통제변수 결측(시총) 제외 시 {int(df['log_mktcap'].notna().sum())}건 "
+          f"(기준 범주 = {BASE_TYPE})\n"
           "어텐션 = log1p(기사 수) z-score, **사후·동시 반응** (수집창 [-1,+1]) — 사전 관심 아님")
 
     for dep, label in [("car_primary", "CAR[0,+20] · 어텐션 창과 겹침"),
@@ -195,7 +219,8 @@ def main() -> None:
     out = DATA_DIR / f"interaction_{mode}.parquet"
     df.to_parquet(out)
     print(f"\n저장: {out}")
-    print("해석: attn_post 계수 = 직접취득의 어텐션 효과, attn_x_trust = 신탁에서의 추가 차이(상호작용).")
+    print(f"해석: attn_post = 기준({BASE_TYPE})의 어텐션 기울기, "
+          "attn_x_<타입> = 그 타입에서의 추가 기울기(상호작용).")
 
 
 if __name__ == "__main__":

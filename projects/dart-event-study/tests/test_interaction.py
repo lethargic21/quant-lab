@@ -68,15 +68,19 @@ def test_cluster_se_inflates_with_correlated_clusters():
 
 
 def _panel(n_per_type=80, interaction=0.0, main=0.0, seed=3):
-    """합성 이벤트 패널: attn_post 효과(main) + 신탁에서의 추가 효과(interaction)."""
+    """합성 이벤트 패널: attn_post 효과(main) + 신탁에서의 추가 효과(interaction).
+
+    event_type 기반(기준=buyback) — run_spec이 더미를 파생하므로 event_type 컬럼을 준다.
+    """
     g = np.random.default_rng(seed)
     rows = []
-    for is_trust in (0.0, 1.0):
+    for etype in ("buyback", "buyback_trust"):
+        is_trust = 1.0 if etype == "buyback_trust" else 0.0
         for i in range(n_per_type):
             attn = g.normal()
             car = main * attn + interaction * attn * is_trust + g.normal(0, 0.05)
             rows.append({
-                "is_trust": is_trust,
+                "event_type": etype,
                 "attn_post": attn,
                 "car_primary": car,
                 "car_nonoverlap": car,
@@ -90,7 +94,7 @@ def _panel(n_per_type=80, interaction=0.0, main=0.0, seed=3):
 def test_detects_injected_interaction():
     df = _panel(interaction=0.08, main=0.02, seed=4)
     res = run_spec(df, "car_primary", with_controls=True)
-    row = res.set_index("term").loc["attn_x_trust"]
+    row = res.set_index("term").loc["attn_x_buyback_trust"]
     assert row["coef"] == pytest.approx(0.08, abs=0.02)
     assert row["p"] < 0.01
 
@@ -98,8 +102,20 @@ def test_detects_injected_interaction():
 def test_null_interaction_not_significant():
     df = _panel(interaction=0.0, main=0.0, seed=5)
     res = run_spec(df, "car_primary", with_controls=True)
-    row = res.set_index("term").loc["attn_x_trust"]
+    row = res.set_index("term").loc["attn_x_buyback_trust"]
     assert row["p"] > 0.05  # 효과 없으면 위양성 안 냄
+
+
+def test_three_event_types_produce_two_dummies_and_interactions():
+    # 유증(rights)까지 3타입 → 기준(buyback) 외 더미 2 + 상호작용 2
+    df = _panel(seed=8)
+    rights = _panel(seed=9).head(60).assign(event_type="rights_offering")
+    df = pd.concat([df, rights], ignore_index=True)
+    res = run_spec(df, "car_primary", with_controls=False)
+    terms = set(res["term"])
+    assert {"is_buyback_trust", "is_rights_offering"} <= terms
+    assert {"attn_x_buyback_trust", "attn_x_rights_offering"} <= terms
+    assert "is_buyback" not in terms  # 기준 범주는 더미 없음
 
 
 def test_run_spec_includes_controls_only_when_asked():
@@ -109,7 +125,8 @@ def test_run_spec_includes_controls_only_when_asked():
     assert "log_mktcap" in set(with_c["term"]) and "est_vol" in set(with_c["term"])
     assert "log_mktcap" not in set(without_c["term"])
     # 상호작용 항은 두 스펙 모두에 존재
-    assert "attn_x_trust" in set(with_c["term"]) and "attn_x_trust" in set(without_c["term"])
+    assert "attn_x_buyback_trust" in set(with_c["term"])
+    assert "attn_x_buyback_trust" in set(without_c["term"])
 
 
 def test_run_spec_drops_rows_with_missing_controls():
