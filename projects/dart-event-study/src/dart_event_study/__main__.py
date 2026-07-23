@@ -41,6 +41,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "board-baseline": ("dart_event_study.board.baseline", "스팸 규칙 베이스라인 리포트"),
     "toss-crawl": ("dart_event_study.toss.crawl", "토스 커뮤니티 1회 크롤 (first-seen)"),
     "toss-aggregate": ("dart_event_study.toss.aggregate", "토스 일별 파생지표 집계"),
+    "toss-deletions": ("dart_event_study.toss.deletions", "스냅샷 → posts/observations/polls + 삭제탐지"),
 }
 
 

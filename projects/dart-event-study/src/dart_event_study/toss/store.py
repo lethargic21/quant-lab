@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 from pathlib import Path
 
 import pandas as pd
@@ -24,6 +25,11 @@ CUM_COLS = [
 ]
 
 
+def content_hash(title: str | None) -> str:
+    """제목/본문 미리보기의 내용 해시 — 편집 탐지용 (원문은 raw에만, 해시는 파생 테이블 안전용)."""
+    return hashlib.sha256((title or "").encode("utf-8")).hexdigest()[:16]
+
+
 def _cum_path(raw_dir: Path, code: str) -> Path:
     d = raw_dir / code
     d.mkdir(parents=True, exist_ok=True)
@@ -31,7 +37,17 @@ def _cum_path(raw_dir: Path, code: str) -> Path:
 
 
 def save_snapshot(raw_dir: Path, code: str, posts: list[Post], crawl_ts: dt.datetime) -> Path:
-    df = pd.DataFrame([p.__dict__ for p in posts])
+    """매 크롤 관측 전체를 피드 순서대로 저장.
+
+    posts는 피드 순서(최신 우선)이므로 행 index = feed_rank. 삭제탐지의 브래킷 판정이
+    이 순서에 의존하므로 **명시적으로 feed_rank 컬럼**으로 못박는다(파케이 행순서 신뢰 대신).
+    content_hash는 편집 탐지용. 둘 다 additive — 기존 스냅샷엔 없어도 파생 단계가 보완한다.
+    """
+    rows = [
+        p.__dict__ | {"feed_rank": rank, "content_hash": content_hash(p.title)}
+        for rank, p in enumerate(posts)
+    ]
+    df = pd.DataFrame(rows)
     df["crawl_ts"] = crawl_ts.isoformat()
     path = raw_dir / code / f"{crawl_ts:%Y%m%dT%H%M%S}.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,13 +93,11 @@ def update_cumulative(
                 likes=p.likes, comments=p.comments, relative_time_label=p.relative_time_label,
                 author_hash=p.author_hash, is_deleted=False, deleted_detected_at=None,
             )
-    # 삭제 판정: **현재 완전 비활성화(보류)**. is_deleted는 항상 False로 둔다.
-    # hit_stop 게이트 + 관측 최소 id 경계로도 오탐을 못 막는다 — 토스 피드는 post_id가
-    # 시간순이 아니고 매 크롤이 id-공간에서 성기게 관측하므로, 스캔 범위 안에 있으나 이번에
-    # 안 잡힌 글이 대량 삭제로 오판된다(실측: 10h 간격 크롤에서 4,793건 오탐. 예: 000660은
-    # 68글 관측에 736건 삭제 오탐). 정확한 삭제 탐지는 피드 순서(스냅샷 row order) 기반이라야
-    # 하며, 순방향 깨끗한 데이터 축적 후 별도 태스크로 만든다: [[toss-deletion-detector]].
-    # hit_stop 인자는 그 미래 탐지기용 시그니처로 유지하되 지금은 사용하지 않는다.
+    # 삭제 판정: **이 라이브 경로에서는 계속 비활성**. is_deleted는 항상 False로 둔다.
+    # 전역 id경계 기반 판정은 대량 오탐(실측: 000660 68글에 736건 오탐)이라 여기서 안 한다.
+    # 정확한 탐지는 불변 스냅샷에서 오프라인으로 파생하는 별도 모듈이 담당한다 —
+    # toss/deletions.py (피드-랭크 지역 인접성 브래킷). 라이브 크롤은 순수 관측만.
+    # hit_stop 인자는 하위호환용 시그니처로 유지하되 사용하지 않는다.
     _ = hit_stop
     newly_deleted = 0
 
