@@ -13,12 +13,14 @@ import csv
 import datetime as dt
 import sys
 import time
+import traceback
 
 import pandas as pd
 import yaml
 
 from dart_event_study.config import CONFIG_DIR, DATA_DIR
-from dart_event_study.toss.board import SortValidationError, crawl_community
+from dart_event_study.toss.board import CrawlStats, SortValidationError, crawl_community
+from dart_event_study.toss.obslog import RunLogger
 from dart_event_study.toss.store import save_snapshot, update_cumulative
 
 RAW_DIR = DATA_DIR / "raw" / "toss"
@@ -68,32 +70,47 @@ def main() -> None:
     salt = get_salt()
     crawl_ts = dt.datetime.now()  # 시스템 로컬(KST 가정) — 장경계 판별 기준
     print(f"=== 토스 크롤 {crawl_ts:%Y-%m-%d %H:%M:%S} | {len(universe)}종목 ===")
+    log = RunLogger(LOG_DIR, crawl_ts, len(universe))  # Phase 1 계측 (하드kill 포렌식)
 
     failures = []
     for i, (code, name) in enumerate(universe.items()):
+        t0 = log.ticker_start(i, code, name)
+        stats = CrawlStats()
         try:
-            posts, hit_stop = crawl_community(code, salt=salt, stop_ids=prev_ids(code))
+            posts, hit_stop = crawl_community(
+                code, salt=salt, stop_ids=prev_ids(code),
+                on_phase=lambda ph, c=code: log.ticker_phase(c, ph), stats=stats,
+            )
             save_snapshot(RAW_DIR, code, posts, crawl_ts)
             summ = update_cumulative(RAW_DIR, code, posts, crawl_ts, hit_stop=hit_stop)
+            log.ticker_end(code, "ok", t0, observed=summ["observed"], new=summ["new"],
+                           scrolls=stats.scrolls, goto_status=stats.goto_status,
+                           status_counts=dict(stats.status_counts))
             print(f"  {code} {name}: 관측 {summ['observed']}, 신규 {summ['new']}, "
                   f"삭제 {summ['deleted_this_crawl']}, 누적 {summ['cumulative_total']}")
         except SortValidationError as e:
             # 게이트 발동: 오염 쌓느니 그 종목·그 슬롯 결측. 결측을 구조화 기록.
             log_sort_failure(crawl_ts, code, name, e.n_posts)
+            log.ticker_end(code, "sort_fail", t0, n_posts=e.n_posts, goto_status=stats.goto_status)
             failures.append((code, name, str(e)[:120]))
             print(f"  {code} {name}: 실패(정렬·결측기록) — {str(e)[:120]}")
         except Exception as e:  # noqa: BLE001 — 한 종목 실패가 전체를 막지 않게
+            log.ticker_end(code, "error", t0, error=str(e)[:200],
+                           traceback=traceback.format_exc()[-1500:], goto_status=stats.goto_status)
             failures.append((code, name, str(e)[:120]))
             print(f"  {code} {name}: 실패 — {str(e)[:120]}")
         if i < len(universe) - 1:
             time.sleep(2.5)
 
+    n_ok = len(universe) - len(failures)
     if failures:
         print(f"\n실패 {len(failures)}종목:")
         for code, name, err in failures:
             print(f"  - {code} {name}: {err}")
+        log.close(exit_code=1, n_ok=n_ok, n_fail=len(failures))
         sys.exit(1)  # 스케줄러 알림 트리거
     print("\n전 종목 성공.")
+    log.close(exit_code=0, n_ok=n_ok, n_fail=0)
 
 
 if __name__ == "__main__":

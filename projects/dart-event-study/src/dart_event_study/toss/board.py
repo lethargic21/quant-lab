@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from playwright.sync_api import sync_playwright
 
@@ -47,6 +49,15 @@ class Post:
     comments: int
     relative_time_label: str | None
     author_hash: str | None  # salted hash (원문 닉네임 미저장)
+
+
+@dataclass
+class CrawlStats:
+    """한 종목 크롤의 계측치 (관측가능성용 — 크롤 동작엔 영향 없음)."""
+
+    goto_status: int | None = None      # 커뮤니티 페이지 첫 응답 상태
+    scrolls: int = 0                    # 실제 스크롤 횟수
+    status_counts: Counter = field(default_factory=Counter)  # 응답 상태 분포(soft-403 등)
 
 
 # 게시글 컨테이너: div[data-post-anchor-id].
@@ -145,7 +156,9 @@ def _switch_to_latest(page) -> bool:
 
 
 def crawl_community(
-    code: str, salt: str, stop_ids: set[str] | None = None, max_scrolls: int = 40, headless: bool = True
+    code: str, salt: str, stop_ids: set[str] | None = None, max_scrolls: int = 40,
+    headless: bool = True, on_phase: Callable[[str], None] | None = None,
+    stats: CrawlStats | None = None,
 ) -> tuple[list[Post], bool]:
     """한 종목 커뮤니티를 최신순으로 크롤. stop_ids(직전 크롤 관측분)에 닿으면 조기 종료.
 
@@ -154,13 +167,23 @@ def crawl_community(
     (윈도우가 이전 글에 닿지 못하면 사라짐이 삭제인지 스크롤 미도달인지 구분 불가).
 
     최신순 검증 실패 시 SortValidationError — 호출측이 그 종목 크롤을 결측으로 기록한다.
+
+    on_phase: 단계 콜백(goto/loaded/scroll/parse) — 어느 단계에서 멈췄는지 하트비트에 남긴다.
+    stats: 계측치를 채워 넣을 CrawlStats(응답상태 분포·스크롤수). 둘 다 관측용, 동작 불변.
     """
     stop_ids = stop_ids or set()
+    ping = on_phase or (lambda _p: None)
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)  # UA 무변조 = 정직한 Chromium
         page = browser.new_page(viewport={"width": 1400, "height": 2200})
+        if stats is not None:  # 응답 상태 분포(soft-403 관측)
+            page.on("response", lambda r: stats.status_counts.update([r.status]))
         try:
-            page.goto(COMMUNITY_URL.format(code=code), timeout=45000)
+            ping("goto")
+            resp = page.goto(COMMUNITY_URL.format(code=code), timeout=45000)
+            if stats is not None and resp is not None:
+                stats.goto_status = resp.status
+            ping("loaded")
             page.wait_for_timeout(9000)
             body = page.inner_text("body")
             if "지원하지 않는 브라우저" in body:
@@ -174,12 +197,16 @@ def crawl_community(
             if n_posts == 0:
                 return [], False  # 빈 커뮤니티
             # 글이 있으면 반드시 최신순 검증 — 인기순으로 오수집하면 first-seen이 무너진다.
+            ping("sort")
             if not _switch_to_latest(page):
                 raise SortValidationError(code, n_posts)
 
             seen: dict[str, dict] = {}
             hit_stop = False
-            for _ in range(max_scrolls):
+            for k in range(max_scrolls):
+                ping(f"scroll{k}")
+                if stats is not None:
+                    stats.scrolls = k + 1
                 for it in page.evaluate(_EXTRACT_JS):
                     if it["id"] in stop_ids:
                         hit_stop = True
@@ -188,6 +215,7 @@ def crawl_community(
                     break
                 page.mouse.wheel(0, 2200)
                 page.wait_for_timeout(1400)
+            ping("parse")
         finally:
             browser.close()
 
