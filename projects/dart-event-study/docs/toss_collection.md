@@ -148,6 +148,30 @@ crawl_1에 없던 글이 crawl_2에 나타나면 그 사이에 작성된 것이 
   로그는 `data/toss_logs/crawl_*.log`.
   (래퍼의 `$repo` 경로 계산이 한 단계 부족해 한동안 엉뚱한 경로에 쓰던 버그를 수정 — 3단계 상위.)
 
+## 관측가능성 (Phase 1 — `toss/obslog.py`)
+
+크롤마다 구조화 로그를 남긴다 — 잡을 수 없는 강제종료(예: 15:30 하드kill)의 흔적 확보용.
+- `data/toss_logs/runs/run_{ts}.jsonl` — 이벤트 스트림(run_start/ticker_start/ticker_end/run_end),
+  줄마다 fsync(버퍼 유실 방지) + 회전(최근 300). ticker_end에 소요시간·스크롤수·goto 상태·
+  **HTTP 상태 분포**(soft-403 관측). 실측: 매 종목 HTTP 490 1건씩(비표준, 토스 soft-block 추정).
+- `data/toss_logs/PROGRESS.txt` — 마지막 단계 한 줄, 원자적 덮어쓰기+fsync. 하드kill 시 여기가
+  "어느 종목·어느 단계(goto/sort/scroll/parse)에서 멈췄나" 증거. signal(SIGINT/TERM/BREAK)·
+  atexit 핸들러도 종료 흔적을 남기지만 TerminateProcess는 못 잡으므로 이 하트비트가 최후 방어.
+
+## 커버리지 원장 + 워치독 (Phase 2 — `toss/ledger.py`, `toss/watchdog.py`)
+
+**원장**(`toss-ledger`): 계획 슬롯(09/12/15:30/21 매일)을 실제 스냅샷과 대조 → (날짜×슬롯)
+상태 ok/partial/missing + 갭 목록. 수집 개시 이전·미래 슬롯은 제외(놓친 게 아니므로).
+run 로그가 있으면 실측 시각·exit·HTTP490을 보강. 실측(개시~현재): 계획 38슬롯 중
+ok 12 / partial 13 / missing 13 — 손실은 대부분 초기 래퍼 버그기 + 머신 미가용기(순방향이라 영구).
+
+**워치독**(`toss-watchdog`): 별도 스케줄 태스크(시간별)가 STATUS.txt의 LAST_SUCCESS 나이 +
+원장 최근 슬롯 상태로 판정. 14h(야간 12h+여유) 초과 stale → `rerun_alert`, 최근 슬롯 missing →
+`rerun`. PS 래퍼(`scripts/toss_watchdog_run.ps1`)가 결정을 읽어 **기존 크롤 태스크를
+`schtasks /run`으로 트리거**(IgnoreNew가 중복 방지) + 토스트. 재실행은 idempotent(post_id
+upsert). ⚠️ **워치독 태스크 등록(`scripts/toss_watchdog_install.ps1`)은 스케줄러 변경이라
+승인 후 수동 실행** — 자동 등록 안 함. (STATUS.txt는 BOM이 붙어 utf-8-sig로 읽는다 — 실측 버그.)
+
 ## 제약 준수 기록
 
 - **실제 Chromium**(Playwright, UA 무변조). 토스는 크롬 지원 → 정식 이용. "미지원 브라우저"
