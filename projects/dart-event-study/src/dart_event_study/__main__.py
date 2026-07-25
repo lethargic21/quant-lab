@@ -44,6 +44,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "toss-deletions": ("dart_event_study.toss.deletions", "스냅샷 → posts/observations/polls + 삭제탐지"),
     "toss-ledger": ("dart_event_study.toss.ledger", "수집 커버리지 원장 + 갭 감지"),
     "toss-watchdog": ("dart_event_study.toss.watchdog", "수집 멈춤 감시 → 재실행·알림 결정"),
+    "toss-profile": ("dart_event_study.toss.profile", "수집 데이터 기술통계(활동량·장중장후·삭제판정가능성)"),
 }
 
 
