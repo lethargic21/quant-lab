@@ -3,7 +3,8 @@
 DART 전자공시에서 이벤트(자사주매입 / 유상증자 / 실적공시)를 감지해 구조화 정보를
 추출하고, 이벤트 스터디와 백테스트로 검증한 엔드투엔드 파이프라인.
 유니버스는 **2019-01 기준** KOSPI 시총 상위 200 보통주(상폐 종목 포함 — v1.2 survivorship 보정),
-기간 2019–2024. **프로젝트 전체 여정 요약은 [notebooks/journey.ipynb](./notebooks/journey.ipynb)**,
+기간 2019–2024. **종합 결과 리포트(LaTeX)는 [report/quant_lab_report.tex](./report/quant_lab_report.tex)**,
+프로젝트 전체 여정 요약은 [notebooks/journey.ipynb](./notebooks/journey.ipynb),
 결과 상세는 [notebooks/report.ipynb](./notebooks/report.ipynb), 설계 이력은 [PLAN.md](./PLAN.md),
 신뢰도 진단·보정 내역은 [RELIABILITY_AUDIT.md](./RELIABILITY_AUDIT.md).
 
@@ -61,9 +62,12 @@ naive/클러스터 t 위에 검정 배터리(BMP·Corrado 순위·일반화 부�
 | + [3] 시행일별 실효 세율(0.30→0.18%) + 수수료 | **+2.4%** | **0.11** |
 | KOSPI 벤치마크 | +3.1% | 0.16 |
 
-- **통계적 유의성 [5]**: 블록 부트스트랩 95% CI [−0.57, +0.97] (산술 Sharpe 0.22 기준),
-  P(Sharpe≤0)=29.5%. **Deflated Sharpe = 7%** — 시도한 조합 중 우연 기대 최대
-  Sharpe에 못 미침. **우연과 구분 불가.**
+- **통계적 유의성 [5]**: 블록 부트스트랩 95% CI [−0.57, +0.97] (산술 Sharpe 0.218 기준),
+  P(Sharpe≤0)=29.5%. **Deflated Sharpe = 3.5%** — 관측 Sharpe 0.218이 시도 20개 조합에서
+  우연히 기대되는 최대치 0.961에 크게 못 미침. **우연과 구분 불가.**
+  (이 문서는 한동안 DSR을 7%로 적어 왔으나 현재 산출물 `significance_full.json`의 값은
+  3.5%다 — 백테스트 재실행으로 시도 조합 집합이 갱신된 결과. 산출물 값으로 정정하며,
+  "우연과 구분 불가"라는 결론은 두 값 모두에서 동일하다.)
 - **신탁 자사주도 동일 판정**: 신탁 H=20이 net 연 +12.2%, Sharpe 0.46으로 새로운 최선
   조합이지만, 이는 시도 조합이 20개로 늘어난 뒤의 사후 선택 — 부트스트랩 CI
   [−0.30, +1.49], **DSR 16.8%**로 역시 우연과 구분 불가. 좋아 보이는 새 조합이 나올
